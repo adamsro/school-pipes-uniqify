@@ -1,1 +1,8 @@
-Hello World!
+UNIX Process control 
+
+Write a C program called uniqify. uniqify's job is to read a text file and output the unique words in the file, sorted in alphabetic order. The input is from stdin, and the output is to stdout.
+
+
+io pipe uniqify to and/or from a file:
+
+uniqify < input-file > output-file

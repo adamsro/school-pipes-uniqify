@@ -1,4 +1,4 @@
-all: default uniqify.o
+all: pdf uniqify.o
 
 clean:
 	rm -rf *o assign1 main.dvi main.ps main.pdf main.log main.aux main.out assign1.dSYM
