@@ -13,6 +13,8 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 
+#define NUM_OF(x) (sizeof (x) / sizeof *(x))
+
 using namespace std;
 
 /*
@@ -31,99 +33,121 @@ void sort_processes() {
 void suppresser() {
 }
 
+int* createArray(const std::vector< int >& v) {
+    int* result = new int [v.size()];
+    memcpy(result, &v.front(), v.size() * sizeof ( int));
+    return result;
+}
+
+vector <int> createVector(int* arr) {
+    std::vector<int> V(*arr, NUM_OF(arr));
+    return V;
+}
+//for(std::vector<int >::iterator it = v.begin(); it != v.end(); ++it) {
+//    /* std::cout << *it; ... */
+//}
+
 int main(int argc, char* argv[]) {
-    int pipes[2]; //  [0] is set up for reading, [1] is set up for writing
+    const int VERBOSE = 1;
+    const int PIPE_READ = 0;
+    const int PIPE_WRITE = 1;
+    typedef int pipe_t[2];
+
     pid_t child_pid;
     std::string word;
     std::ifstream infile;
-    int status;
     int numChildren;
-    pid_t *childPids = NULL;
-    int *pipesArr = NULL;
-    char readbuf[80];
-    int std0;
-    int std1;
-
 
     if (argc != 2) {
-        cout << "USAGE: uniqify [num_sort_processes]";
+        std::cout << "USAGE: uniqify [num_sort_processes]";
         //exit(EXIT_SUCCESS);
     }
     numChildren = atoi(argv[2]);
     numChildren = 3;
 
-    //std::vector<pid_t> childPids;
-    //std::vector<int> pipesArr;
-    childPids = malloc(numChildren * sizeof (pid_t));
-    pipesArr = malloc(numChildren * sizeof (pipes));
-
-    std0 = dup(0); // backup stdin
-    std1 = dup(1); // backup stdout
+    std::vector<pid_t> childPids(numChildren, 0);
+    std::vector<std::vector<int> > pipes(numChildren, std::vector<int>(2, 0));
+    //childPids = malloc(numChildren * sizeof (pid_t));
+    //pipesArr = malloc(numChildren * 2 * sizeof (int));
 
     /* Fork all the children and save their id's*/
+    pipe_t fd;
     for (int i = 0; i < numChildren; ++i) {
-        if (pipe(pipes) < 0) { // use mkfifo ?
+        if (pipe(fd) < 0) { // use mkfifo ?
             std::cerr << "Failed to create pipes." << endl;
             return -2;
         }
-        pipesArr[i] = pipes;
+//        FILE*read = fdopen(fd[PIPE_READ]);
+//        FILE*write = fdopen(fd[PIPE_READ]);
+        std::vector<int> V(fd, fd + sizeof (fd) / sizeof (int));
+        pipes.at(i) = V;
         switch (child_pid = fork()) {
             case -1:
                 std::cout << "Failed to fork." << endl;
                 exit(EXIT_FAILURE);
             case 0: // is Child
-                /* Close stdin and duplicate fd[0] to this position*/
-                dup2(0, pipes[0]);
-                dup2(1, pipes[1]);
+                /* Culose stdin and duplicate PIPE_READ to this position*/
+                dup2(STDIN_FILENO, pipes.at(i)[PIPE_READ]);
+                dup2(STDOUT_FILENO, pipes.at(i)[PIPE_WRITE]);
                 execlp("sort", "sort", NULL);
                 //execl("/usr/bin/sort", "sort");
                 _exit(127); /* Failed exec */
                 break;
             default: // is Parent
-                childPids[i] = child_pid;
+                childPids.at(i) = child_pid;
                 break;
+        }
+    }
+    if (VERBOSE) {
+        cout << "\npids" << endl;
+        for (std::vector<int >::iterator it = childPids.begin(); it != childPids.end(); ++it) {
+            std::cout << *it << endl;
+        }
+        cout << "pipes" << endl;
+        for (int i = 0; i < pipes.size(); ++i) {
+            std::cout << pipes[i][PIPE_READ] << " " << pipes[i][PIPE_WRITE] << endl;
         }
     }
 
     infile.open("test-loves-labors-lost.txt"); // <-- lots of words
 
     /* Processing loop */
-    //while (infile.good()) {
     int j = 0;
     while (infile >> word) {
-        //  >> ws; // eats white space
-        //cout << word << "\n";
-        fgets(readbuf, 80, word);
-        //if (infile.eof()) break;
-        fputs(readbuf, pipesArr[j]);
+        //fputs(word.c_str(), pipes.at(j)[PIPE_READ]);
         (j < numChildren) ? ++j : j = 0;
     }
+    //fgets(readbuf, 80, word);
 
     infile.close();
 
-    close(pipes);
-
     /* Wait for children to exit */
-    int stillWaiting;
+    int status;
     do {
-        stillWaiting = 0;
+        status = 0;
         for (int i = 0; i < numChildren; ++i) {
             if (childPids[i] > 0) {
                 if (waitpid(childPids[i], NULL, WNOHANG) == 0) {
                     /* Child is done */
                     childPids[i] = 0;
+                    if (VERBOSE) {
+                        std::cout << "child " << i << "is done." << endl;
+                    }
                 } else {
                     /* Still waiting on this child */
-                    stillWaiting = 1;
+                    status = 1;
                 }
             }
             /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
             sleep(0);
         }
-    } while (stillWaiting);
+    } while (status);
+
+    /* Collect pipes, merge and remove duplicates */
 
 
     /* Cleanup */
-    free(childPids);
+    //free(childPids);
     exit(EXIT_SUCCESS);
 }
+
