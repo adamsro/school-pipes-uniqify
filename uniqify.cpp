@@ -7,6 +7,8 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <cerrno>
+#include <stdio.h>
 
 #include <unistd.h>
 #include <sys/wait.h>
@@ -61,12 +63,12 @@ int main(int argc, char* argv[]) {
     int numChildren;
 
     if (argc != 2) {
-        std::cout << "USAGE: uniqify [num_sort_processes]";
+        //std::cout << "USAGE: uniqify [num_sort_processes]";
         //exit(EXIT_SUCCESS);
     }
+    std::cout << "starting program\n";
     numChildren = atoi(argv[2]);
-    numChildren = 3;
-
+    numChildren = 2;
     std::vector<pid_t> clist(numChildren);
     std::vector<pipes_t> plist(numChildren);
     //std::vector<pipesfd_t> pfdlist(numChildren);
@@ -93,11 +95,13 @@ int main(int argc, char* argv[]) {
                 close(p.write_byparent);
                 close(p.read_byparent);
                 if (dup2(p.read_bychild, STDIN_FILENO) != STDIN_FILENO) {
-                    std::cerr << "dup2 error to stdin" << std::endl;
+                    std::cout << "dup2 error: " << strerror(errno) << std::endl;
                 }
                 close(p.read_bychild);
+
+                //if (dup2(fd2[PIPE_WRITE], STDOUT_FILENO) != STDOUT_FILENO) {
                 if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
-                    std::cerr << "dup2 error to stdout" << std::endl;
+                    std::cout << "dup2 error: " << strerror(errno) << std::endl;
                 }
                 close(p.write_bychild);
                 //                pipesfd_t* pfdlist;
@@ -130,50 +134,53 @@ int main(int argc, char* argv[]) {
     infile.open("test-loves-labors-lost.txt"); // <-- lots of words
     pipesfd_t* pfdlist;
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
-
-    for (int i = 0; i < numChildren; ++i) {
-        pfdlist[i][PIPE_READ] = fdopen(plist.at(1).read_byparent, "r");
-        pfdlist[i][PIPE_WRITE] = fdopen(plist.at(1).write_byparent, "w");
+    if (pfdlist == NULL) {
+        std::cout << "malloc error: " << strerror(errno) << std::endl;
     }
-    if (VERBOSE) {
-        std::cout << "read      write" << std::endl;
-        for (int i = 0; i < numChildren; ++i) {
-            std::cout << pfdlist[i][PIPE_READ] << " ";
-            std::cout << pfdlist[i][PIPE_WRITE] << std::endl;
+    for (int j = 0; j < numChildren; ++j) {
+        close(plist.at(j).read_bychild);
+        close(plist.at(j).write_bychild);
+        pfdlist[j][PIPE_READ] = fdopen(plist.at(j).read_byparent, "r");
+        if (pfdlist[j][PIPE_READ] == NULL) {
+            std::cout << "fdopen error, read: " << strerror(errno) << std::endl;
+        }
+        pfdlist[j][PIPE_WRITE] = fdopen(plist.at(j).write_byparent, "w");
+        if (pfdlist[j][PIPE_WRITE] == NULL) {
+            std::cout << "fdopen error, write: " << strerror(errno) << std::endl;
         }
     }
 
     /* Processing loop */
-    int i = 0;
+    int k = 0;
     while (infile >> word) {
-        (i < numChildren) ? ++i : i = 0;
-        if (fputs(word.c_str(), pfdlist[i][PIPE_WRITE]) == EOF) {
-            std::cout << "fputs error";
-            exit(EXIT_FAILURE);
+        (k == numChildren - 1) ? k = 0 : ++k;
+        word.append("\n");
+        if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
+            std::cout << "fputs error, write: " << strerror(errno) << std::endl;
         }
     }
-    for (int i = 0; i < numChildren; ++i) {
-        fclose(pfdlist[i][PIPE_WRITE]);
+    for (int l = 0; l < numChildren; ++l) {
+        if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
+            std::cout << "fclose error, write: " << strerror(errno) << std::endl;
+        }
     }
 
     char readbuf [100];
-    outfile.open("example.txt", std::ios::trunc);
-    //outfile << "Writing this to a file.\n";
-    i = 0;
-    int eofs;
+    outfile.open("output.txt", std::ios::trunc);
+    int i = 0;
+    int eofs = 0;
     while (eofs != numChildren) {
-        (i < numChildren) ? ++i : i = 0;
-        if (!feof(pfdlist[i][PIPE_READ]) && fgets(readbuf, 100, pfdlist[i][PIPE_READ]) != NULL) {
-            outfile << readbuf;
-        } else {
+        if (fgets(readbuf, 100, pfdlist[i][PIPE_READ]) == NULL && !feof(pfdlist[i][PIPE_READ])) {
+            std::cout << "fclose error, write: " << strerror(errno) << std::endl;
+        } else if (feof(pfdlist[i][PIPE_READ])) {
             ++eofs;
+        } else {
+            outfile << readbuf;
         }
+        (i == numChildren - 1) ? i = 0 : ++i;
     }
-    outfile.close();
-    //fgets(readbuf, 80, word);
-    /* close to flush buffer*/
-    //fclose()
 
+    outfile.close();
     infile.close();
 
     /* Wait for children to exit */
