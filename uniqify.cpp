@@ -57,6 +57,7 @@ int main(int argc, char* argv[]) {
     pid_t child_pid;
     std::string word;
     std::ifstream infile;
+    std::ofstream outfile;
     int numChildren;
 
     if (argc != 2) {
@@ -99,12 +100,9 @@ int main(int argc, char* argv[]) {
                     std::cerr << "dup2 error to stdout" << std::endl;
                 }
                 close(p.write_bychild);
-                fdopen(plist.at(1).write_byparent, "w");
-                /*                pipesfd_t pfd;
-                                pfd.read = fdopen(p.read_bychild, "r");
-                                pfd.write = fdopen(p.write_bychild, "w");
-                                pfdlist.at(i) = pfd;
-                 */
+                //                pipesfd_t* pfdlist;
+                //                pfdlist[PIPE_READ] = fdopen(plist.at(1).read_byparent, "r");
+                //                pfdlist[PIPE_WRITE] = fdopen(plist.at(1).write_byparent, "w");
                 execlp("sort", "sort", NULL); //execl("/usr/bin/sort", "sort");
                 _exit(127); /* Failed exec, doesn't flush file desc */
                 break;
@@ -113,6 +111,7 @@ int main(int argc, char* argv[]) {
                 break;
         }
     }
+
     if (VERBOSE) {
         std::cout << "\npids" << std::endl;
         for (std::vector<int >::iterator it = clist.begin();
@@ -131,6 +130,7 @@ int main(int argc, char* argv[]) {
     infile.open("test-loves-labors-lost.txt"); // <-- lots of words
     pipesfd_t* pfdlist;
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
+
     for (int i = 0; i < numChildren; ++i) {
         pfdlist[i][PIPE_READ] = fdopen(plist.at(1).read_byparent, "r");
         pfdlist[i][PIPE_WRITE] = fdopen(plist.at(1).write_byparent, "w");
@@ -144,13 +144,32 @@ int main(int argc, char* argv[]) {
     }
 
     /* Processing loop */
-    int j = 0;
-    FILE* file;
-    //file = fdopen(plist.at(j).write_byparent, "w");
+    int i = 0;
     while (infile >> word) {
-        fputs(word.c_str(), file);
-        (j < numChildren) ? ++j : j = 0;
+        (i < numChildren) ? ++i : i = 0;
+        if (fputs(word.c_str(), pfdlist[i][PIPE_WRITE]) == EOF) {
+            std::cout << "fputs error";
+            exit(EXIT_FAILURE);
+        }
     }
+    for (int i = 0; i < numChildren; ++i) {
+        fclose(pfdlist[i][PIPE_WRITE]);
+    }
+
+    char readbuf [100];
+    outfile.open("example.txt", std::ios::trunc);
+    //outfile << "Writing this to a file.\n";
+    i = 0;
+    int eofs;
+    while (eofs != numChildren) {
+        (i < numChildren) ? ++i : i = 0;
+        if (!feof(pfdlist[i][PIPE_READ]) && fgets(readbuf, 100, pfdlist[i][PIPE_READ]) != NULL) {
+            outfile << readbuf;
+        } else {
+            ++eofs;
+        }
+    }
+    outfile.close();
     //fgets(readbuf, 80, word);
     /* close to flush buffer*/
     //fclose()
@@ -160,8 +179,8 @@ int main(int argc, char* argv[]) {
     /* Wait for children to exit */
     int status;
     do {
-        status = 0;
         for (int i = 0; i < numChildren; ++i) {
+            status = 0;
             if (clist[i] > 0) {
                 if (waitpid(clist[i], NULL, WNOHANG) == 0) {
                     /* Child is done */
@@ -188,3 +207,11 @@ int main(int argc, char* argv[]) {
 //childPids = (pid_t*) malloc(numChildren * sizeof (pid_t));
 //std::vector<int> V(fd, fd + sizeof (fd) / sizeof (int));
 //pipes.at(i) = V;
+/*
+    FILE** name;
+    name = (FILE**) malloc(numChildren * 2 * sizeof (FILE*));
+    for (int i = 0; i < numChildren * 2; i = i + 2) {
+        name[i] = fdopen(plist.at(1).read_byparent, "r");
+        name[i + 1] = fdopen(plist.at(1).write_byparent, "w");
+    }
+ */
