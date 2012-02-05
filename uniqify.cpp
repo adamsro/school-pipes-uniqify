@@ -16,9 +16,9 @@
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
-#define DEBUG = 1;
-#define PIPE_READ = 0;
-#define PIPE_WRITE = 1;
+//#define DEBUG = 1;
+//#define PIPE_READ = 0;
+//#define PIPE_WRITE = 1;
 
 struct pipes_t {
     pid_t child_pid;
@@ -29,6 +29,9 @@ struct pipes_t {
 typedef FILE* pipesfd_t[2];
 
 class Uniqify {
+    static const int DEBUG = 1;
+    static const int PIPE_READ = 0;
+    static const int PIPE_WRITE = 1;
     int numChildren;
     pid_t child_pid;
     std::string word;
@@ -36,46 +39,42 @@ class Uniqify {
     std::ofstream outfile;
     std::vector<pid_t> clist;
     std::vector<pipes_t> plist;
+
 public:
-    Uniqify(int children);
+    Uniqify();
     void set_input_file(std::string infile);
     void set_output_file(std::string outfile);
-    void fork_processes();
+    void fork_processes(int children);
     void parser();
     void suppressor();
-    void waitpid();
 };
 
-Uniqify::Uniqify(int children) {
-    numChildren = children;
+Uniqify::Uniqify() {
 }
-void Uniqify::fork_processes(int numChildren) {
-       const int VERBOSE = 1;
-    const int PIPE_READ = 0;
-    const int PIPE_WRITE = 1;
+
+void Uniqify::fork_processes(int children) {
     int fd1[2];
     int fd2[2];
     pid_t child_pid;
-    std::string word;
 
-
-    numChildren = 2;
-    std::vector<pid_t> clist(numChildren);
-    std::vector<pipes_t> plist(numChildren);
+    numChildren = children;
+    //5std::vector<pid_t>
+    //clist.assign(numChildren);
+    //std::vector<pipes_t>
+    //plist.assign(numChildren);
     //std::vector<pipesfd_t> pfdlist(numChildren);
 
     /* Fork all the children and save their id's*/
     for (int i = 0; i < numChildren; ++i) {
         if ((pipe(fd1) < 0) || (pipe(fd2) < 0)) {
             std::cerr << "PIPE ERROR" << std::endl;
-            return -2;
         }
         pipes_t p;
         p.read_bychild = fd1[PIPE_READ];
         p.write_byparent = fd1[PIPE_WRITE];
         p.read_byparent = fd2[PIPE_READ];
         p.write_bychild = fd2[PIPE_WRITE];
-        plist.at(i) = p;
+        plist.push_back(p);
 
         switch (child_pid = fork()) {
             case -1:
@@ -103,12 +102,12 @@ void Uniqify::fork_processes(int numChildren) {
                 exit(0);
                 break;
             default: // is Parent
-                clist.at(i) = child_pid;
+                clist.push_back(child_pid);
                 break;
         }
     }
 
-    if (VERBOSE) {
+    if (DEBUG) {
         std::cout << "\npids" << std::endl;
         for (std::vector<int >::iterator it = clist.begin();
                 it != clist.end(); ++it) {
@@ -123,10 +122,16 @@ void Uniqify::fork_processes(int numChildren) {
     }
 
 }
-Uniqify::parser() {
-       //pfdlist.at(1).write = fdopen(plist.at(1).write, "r");
-    infile.open("test-loves-labors-lost.txt"); // <-- lots of words
+
+void Uniqify::parser() {
+    std::string word;
     pipesfd_t* pfdlist;
+    char readbuf [100];
+    int i = 0;
+    int eofs = 0;
+
+    //pfdlist.at(1).write = fdopen(plist.at(1).write, "r");
+    infile.open("test-loves-labors-lost.txt"); // <-- lots of words
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
     if (pfdlist == NULL) {
         std::cout << "malloc error: " << strerror(errno) << std::endl;
@@ -157,10 +162,9 @@ Uniqify::parser() {
             std::cout << "fclose error, write: " << strerror(errno) << std::endl;
         }
     }
-    char readbuf [100];
+
     outfile.open("output.txt", std::ios::trunc);
-    int i = 0;
-    int eofs = 0;
+    i = 0;
     while (eofs != numChildren) {
         if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL && !feof(pfdlist[i][PIPE_READ])) {
             std::cout << "fgets error, write: " << strerror(errno) << std::endl;
@@ -182,8 +186,9 @@ Uniqify::parser() {
     infile.close();
 
 }
-Uniqify::suppressor(std::vector<pid_t> clist) {
-        /* Wait for children to exit */
+
+void Uniqify::suppressor() {
+    /* Wait for children to exit */
     int stillwating;
     int i = 0;
     do {
@@ -205,8 +210,6 @@ Uniqify::suppressor(std::vector<pid_t> clist) {
     } while (stillwating);
 
     /* Collect pipes, merge and remove duplicates */
-
-    return 0;
 }
 
 int main(int argc, char* argv[]) {
@@ -214,8 +217,12 @@ int main(int argc, char* argv[]) {
         std::cout << "USAGE: uniqify [num_sort_processes]";
         //exit(EXIT_SUCCESS);
     }
-    Uniqify uniq;
-    uniq.fork_processes();
-    uniq.parser();
-    uniq.suppressor();
+    try {
+        Uniqify uniq;
+        uniq.fork_processes(3);
+        uniq.parser();
+        uniq.suppressor();
+    } catch (int e) {
+        std::cout << "error";
+    }
 }
