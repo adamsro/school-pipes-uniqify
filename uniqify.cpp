@@ -26,27 +26,11 @@ struct pipes_t {
 //};
 typedef FILE* pipesfd_t[2];
 
-/*
- * Parse words from input stream. convert to lowercase
- * non-alphabetic characters delimit words are discarded
- */
-void parser(int numsorts) {
-}
 
-void sort_processes() {
-}
-
-/*
- * Supress duplicate words, write to output
- */
-void suppresser() {
-}
-
-int* createArray(const std::vector< int >& v) {
-    int* result = new int [v.size()];
-    memcpy(result, &v.front(), v.size() * sizeof ( int));
-    return result;
-}
+//class Uniqify {
+//public:
+//    Uniqify
+//};
 
 int main(int argc, char* argv[]) {
     const int VERBOSE = 1;
@@ -108,7 +92,8 @@ int main(int argc, char* argv[]) {
                 //                pfdlist[PIPE_READ] = fdopen(plist.at(1).read_byparent, "r");
                 //                pfdlist[PIPE_WRITE] = fdopen(plist.at(1).write_byparent, "w");
                 execlp("sort", "sort", NULL); //execl("/usr/bin/sort", "sort");
-                _exit(127); /* Failed exec, doesn't flush file desc */
+                //_exit(127); /* Failed exec, doesn't flush file desc */
+                exit(0);
                 break;
             default: // is Parent
                 clist.at(i) = child_pid;
@@ -153,11 +138,11 @@ int main(int argc, char* argv[]) {
     /* Processing loop */
     int k = 0;
     while (infile >> word) {
-        (k == numChildren - 1) ? k = 0 : ++k;
         word.append("\n");
         if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
             std::cout << "fputs error, write: " << strerror(errno) << std::endl;
         }
+        (k == numChildren - 1) ? k = 0 : ++k;
     }
     for (int l = 0; l < numChildren; ++l) {
         if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
@@ -170,12 +155,18 @@ int main(int argc, char* argv[]) {
     int i = 0;
     int eofs = 0;
     while (eofs != numChildren) {
-        if (fgets(readbuf, 100, pfdlist[i][PIPE_READ]) == NULL && !feof(pfdlist[i][PIPE_READ])) {
-            std::cout << "fclose error, write: " << strerror(errno) << std::endl;
-        } else if (feof(pfdlist[i][PIPE_READ])) {
+        if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL && !feof(pfdlist[i][PIPE_READ])) {
+            std::cout << "fgets error, write: " << strerror(errno) << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        if (feof(pfdlist[i][PIPE_READ])) {
+            if (fclose(pfdlist[i][PIPE_READ]) < 0) {
+                std::cout << "fclose error, read: " << strerror(errno) << std::endl;
+            }
             ++eofs;
         } else {
             outfile << readbuf;
+            //suppresser(readbuf);
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
@@ -184,26 +175,25 @@ int main(int argc, char* argv[]) {
     infile.close();
 
     /* Wait for children to exit */
-    int status;
+    int stillwating;
+    i = 0;
     do {
-        for (int i = 0; i < numChildren; ++i) {
-            status = 0;
-            if (clist[i] > 0) {
-                if (waitpid(clist[i], NULL, WNOHANG) == 0) {
-                    /* Child is done */
-                    clist[i] = 0;
-                    if (VERBOSE) {
-                        std::cout << "child " << i << " is done." << std::endl;
-                    }
-                } else {
-                    /* Still waiting on this child */
-                    status = 1;
+        stillwating = 0;
+        if (clist.at(i) > 0) {
+            if (waitpid(clist.at(i), NULL, WNOHANG) == 0) {
+                clist.at(i) = 0; /* Child is done */
+                if (VERBOSE) {
+                    std::cout << "child " << i << " is done." << std::endl;
                 }
+            } else {
+                /* Still waiting on this child */
+                stillwating = 1;
             }
-            /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
-            sleep(0);
         }
-    } while (status);
+        /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
+        sleep(0);
+        (i == numChildren - 1) ? i = 0 : ++i;
+    } while (stillwating);
 
     /* Collect pipes, merge and remove duplicates */
 
