@@ -1,9 +1,9 @@
 /*
  *
  * very helpful: http://tldp.org/LDP/lpg/node11.html
- * and http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
+ * and: http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
  */
-#define _POSIX_SOURCE // first line of source?
+#define _POSIX_SOURCE // needed?
 #include <vector>
 #include <iostream>
 #include <fstream>
@@ -16,42 +16,49 @@
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
+#define DEBUG = 1;
+#define PIPE_READ = 0;
+#define PIPE_WRITE = 1;
+
 struct pipes_t {
+    pid_t child_pid;
     int read_bychild, write_byparent;
     int read_byparent, write_bychild;
 };
 
-//struct pipesfd_t {
-//    FILE* read, write;
-//};
 typedef FILE* pipesfd_t[2];
 
-
-//class Uniqify {
-//public:
-//    Uniqify
-//};
-
-int main(int argc, char* argv[]) {
-    const int VERBOSE = 1;
-    const int PIPE_READ = 0;
-    const int PIPE_WRITE = 1;
-    //typedef int pipe_t[2];
-    int fd1[2];
-    int fd2[2];
-
+class Uniqify {
+    int numChildren;
     pid_t child_pid;
     std::string word;
     std::ifstream infile;
     std::ofstream outfile;
-    int numChildren;
+    std::vector<pid_t> clist;
+    std::vector<pipes_t> plist;
+public:
+    Uniqify(int children);
+    void set_input_file(std::string infile);
+    void set_output_file(std::string outfile);
+    void fork_processes();
+    void parser();
+    void suppressor();
+    void waitpid();
+};
 
-    if (argc != 2) {
-        //std::cout << "USAGE: uniqify [num_sort_processes]";
-        //exit(EXIT_SUCCESS);
-    }
-    std::cout << "starting program\n";
-    numChildren = atoi(argv[2]);
+Uniqify::Uniqify(int children) {
+    numChildren = children;
+}
+void Uniqify::fork_processes(int numChildren) {
+       const int VERBOSE = 1;
+    const int PIPE_READ = 0;
+    const int PIPE_WRITE = 1;
+    int fd1[2];
+    int fd2[2];
+    pid_t child_pid;
+    std::string word;
+
+
     numChildren = 2;
     std::vector<pid_t> clist(numChildren);
     std::vector<pipes_t> plist(numChildren);
@@ -115,7 +122,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    //pfdlist.at(1).write = fdopen(plist.at(1).write, "r");
+}
+Uniqify::parser() {
+       //pfdlist.at(1).write = fdopen(plist.at(1).write, "r");
     infile.open("test-loves-labors-lost.txt"); // <-- lots of words
     pipesfd_t* pfdlist;
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
@@ -134,7 +143,6 @@ int main(int argc, char* argv[]) {
             std::cout << "fdopen error, write: " << strerror(errno) << std::endl;
         }
     }
-
     /* Processing loop */
     int k = 0;
     while (infile >> word) {
@@ -149,7 +157,6 @@ int main(int argc, char* argv[]) {
             std::cout << "fclose error, write: " << strerror(errno) << std::endl;
         }
     }
-
     char readbuf [100];
     outfile.open("output.txt", std::ios::trunc);
     int i = 0;
@@ -174,15 +181,17 @@ int main(int argc, char* argv[]) {
     outfile.close();
     infile.close();
 
-    /* Wait for children to exit */
+}
+Uniqify::suppressor(std::vector<pid_t> clist) {
+        /* Wait for children to exit */
     int stillwating;
-    i = 0;
+    int i = 0;
     do {
         stillwating = 0;
         if (clist.at(i) > 0) {
             if (waitpid(clist.at(i), NULL, WNOHANG) == 0) {
                 clist.at(i) = 0; /* Child is done */
-                if (VERBOSE) {
+                if (DEBUG) {
                     std::cout << "child " << i << " is done." << std::endl;
                 }
             } else {
@@ -200,15 +209,13 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-//std::vector<std::vector<int> > pipes(numChildren, std::vector<int> (2));
-//childPids = (pid_t*) malloc(numChildren * sizeof (pid_t));
-//std::vector<int> V(fd, fd + sizeof (fd) / sizeof (int));
-//pipes.at(i) = V;
-/*
-    FILE** name;
-    name = (FILE**) malloc(numChildren * 2 * sizeof (FILE*));
-    for (int i = 0; i < numChildren * 2; i = i + 2) {
-        name[i] = fdopen(plist.at(1).read_byparent, "r");
-        name[i + 1] = fdopen(plist.at(1).write_byparent, "w");
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cout << "USAGE: uniqify [num_sort_processes]";
+        //exit(EXIT_SUCCESS);
     }
- */
+    Uniqify uniq;
+    uniq.fork_processes();
+    uniq.parser();
+    uniq.suppressor();
+}
