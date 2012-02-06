@@ -32,7 +32,7 @@ public:
 
 };
 
-struct Pipes {
+struct pipes_t {
     pid_t child_pid;
     int read_bychild, write_byparent;
     int read_byparent, write_bychild;
@@ -43,11 +43,10 @@ typedef FILE* pipesfd_t[2];
 class Uniqify {
     static const int PIPE_READ = 0;
     static const int PIPE_WRITE = 1;
-    std::vector<Pipes> plist;
+    std::vector<pipes_t> plist;
     int numChildren;
     std::ifstream infile;
     std::ofstream outfile;
-    //const Exception e;
 
 public:
     Uniqify(int children);
@@ -60,8 +59,8 @@ public:
 
 Uniqify::Uniqify(int children) {
     numChildren = children;
-    infile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-    outfile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+//    infile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+//    outfile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
 }
 
 void Uniqify::fork_processes() {
@@ -69,13 +68,12 @@ void Uniqify::fork_processes() {
     int fd2[2];
     pid_t child_pid;
 
-
     /* Fork all the children and save their id's*/
     for (int i = 0; i < numChildren; ++i) {
         if ((pipe(fd1) < 0) || (pipe(fd2) < 0)) {
             throw (Exception("pipe failed", __LINE__, errno));
         }
-        Pipes p;
+        pipes_t p;
         p.read_bychild = fd1[PIPE_READ];
         p.write_byparent = fd1[PIPE_WRITE];
         p.read_byparent = fd2[PIPE_READ];
@@ -149,8 +147,7 @@ void Uniqify::parser() {
     }
     /* send input to the sort processes in a round-robin fashion */
     int k = 0;
-    while (!infile.eof()) {
-        infile >> word;
+    while (infile >> word) {
         word.append("\n");
         if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
             throw (Exception("fputs failed", __LINE__, errno));
@@ -164,33 +161,34 @@ void Uniqify::parser() {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
-
+    int pipes[2];
+    pipe(pipes);
     /* retreive all words from sort processes in a round-robin fashion */
-    outfile.open("output.txt", std::ios::trunc);
     i = 0;
     while (eofs != numChildren) {
-        if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL && !feof(pfdlist[i][PIPE_READ])) {
-            throw (Exception("fgets failed", __LINE__, errno));
-        }
-        if (feof(pfdlist[i][PIPE_READ])) {
+        if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
             if (fclose(pfdlist[i][PIPE_READ]) < 0) {
                 throw (Exception("fclose failed", __LINE__, errno));
             }
             ++eofs;
         } else {
-            outfile << readbuf;
+            //fd[PIPE_WRITE] << readbuf;
+            std::cout << readbuf;
+            //if (fwrite(readbuf, sizeof char, sizeof readbuf, fd[PIPE_WRITE] ) != sizeof(readbuf)) {
+            //}
+
             //suppresser(readbuf);
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
-
-    outfile.close();
     infile.close();
     free(pfdlist);
 }
 
 void Uniqify::suppressor() {
-    static std::string oldword = NULL;
+    outfile.open("output.txt", std::ios::trunc);
+    outfile.close();
+    std::string oldword;
     std::string newword;
     if (newword.compare(oldword) != 0) {
         std::cout << oldword << newword << "\n";
