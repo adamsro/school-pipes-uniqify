@@ -1,9 +1,9 @@
 /*
  *
  * very helpful: http://tldp.org/LDP/lpg/node11.html
- * and http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
+ * and: http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
  */
-#define _POSIX_SOURCE // first line of source?
+#define _POSIX_SOURCE // needed?
 #include <vector>
 #include <iostream>
 #include <fstream>
@@ -16,152 +16,165 @@
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
-struct pipes_t {
+#define VERBOSE = 1;
+
+class Exception {
+public:
+
+    Exception(std::string message, int line, int errnum = 0) {
+        errmsg = message;
+        cerrno = errnum;
+        errline = line;
+    }
+    std::string errmsg;
+    int cerrno;
+    int errline;
+
+};
+
+struct Pipes {
+    pid_t child_pid;
     int read_bychild, write_byparent;
     int read_byparent, write_bychild;
 };
 
-//struct pipesfd_t {
-//    FILE* read, write;
-//};
 typedef FILE* pipesfd_t[2];
 
-
-//class Uniqify {
-//public:
-//    Uniqify
-//};
-
-int main(int argc, char* argv[]) {
-    const int VERBOSE = 1;
-    const int PIPE_READ = 0;
-    const int PIPE_WRITE = 1;
-    //typedef int pipe_t[2];
-    int fd1[2];
-    int fd2[2];
-
-    pid_t child_pid;
-    std::string word;
+class Uniqify {
+    static const int PIPE_READ = 0;
+    static const int PIPE_WRITE = 1;
+    std::vector<Pipes> plist;
+    int numChildren;
     std::ifstream infile;
     std::ofstream outfile;
-    int numChildren;
+    //const Exception e;
 
-    if (argc != 2) {
-        //std::cout << "USAGE: uniqify [num_sort_processes]";
-        //exit(EXIT_SUCCESS);
-    }
-    std::cout << "starting program\n";
-    numChildren = atoi(argv[2]);
-    numChildren = 2;
-    std::vector<pid_t> clist(numChildren);
-    std::vector<pipes_t> plist(numChildren);
-    //std::vector<pipesfd_t> pfdlist(numChildren);
+public:
+    Uniqify(int children);
+    void set_input_file(std::string infile);
+    void set_output_file(std::string outfile);
+    void fork_processes();
+    void parser();
+    void suppressor();
+};
+
+Uniqify::Uniqify(int children) {
+    numChildren = children;
+    infile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+    outfile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+}
+
+void Uniqify::fork_processes() {
+    int fd1[2];
+    int fd2[2];
+    pid_t child_pid;
+
 
     /* Fork all the children and save their id's*/
     for (int i = 0; i < numChildren; ++i) {
         if ((pipe(fd1) < 0) || (pipe(fd2) < 0)) {
-            std::cerr << "PIPE ERROR" << std::endl;
-            return -2;
+            throw (Exception("pipe failed", __LINE__, errno));
         }
-        pipes_t p;
+        Pipes p;
         p.read_bychild = fd1[PIPE_READ];
         p.write_byparent = fd1[PIPE_WRITE];
         p.read_byparent = fd2[PIPE_READ];
         p.write_bychild = fd2[PIPE_WRITE];
-        plist.at(i) = p;
+        plist.push_back(p);
 
         switch (child_pid = fork()) {
             case -1:
-                std::cout << "Failed to fork." << std::endl;
-                exit(EXIT_FAILURE);
+                throw (Exception("fork failed", __LINE__, errno));
             case 0: // is Child
                 /* Culose stdin and duplicate PIPE_READ to this position*/
                 close(p.write_byparent);
                 close(p.read_byparent);
                 if (dup2(p.read_bychild, STDIN_FILENO) != STDIN_FILENO) {
-                    std::cout << "dup2 error: " << strerror(errno) << std::endl;
+                    throw (Exception("dup2 failed", __LINE__, errno));
                 }
                 close(p.read_bychild);
 
                 //if (dup2(fd2[PIPE_WRITE], STDOUT_FILENO) != STDOUT_FILENO) {
                 if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
-                    std::cout << "dup2 error: " << strerror(errno) << std::endl;
+                    throw (Exception("dup2 failed", __LINE__, errno));
                 }
                 close(p.write_bychild);
-                //                pipesfd_t* pfdlist;
-                //                pfdlist[PIPE_READ] = fdopen(plist.at(1).read_byparent, "r");
-                //                pfdlist[PIPE_WRITE] = fdopen(plist.at(1).write_byparent, "w");
+
                 execlp("sort", "sort", NULL); //execl("/usr/bin/sort", "sort");
                 //_exit(127); /* Failed exec, doesn't flush file desc */
                 exit(0);
                 break;
             default: // is Parent
-                clist.at(i) = child_pid;
+                //clist.push_back(child_pid);
+                plist.at(i).child_pid = child_pid;
                 break;
         }
     }
 
-    if (VERBOSE) {
-        std::cout << "\npids" << std::endl;
-        for (std::vector<int >::iterator it = clist.begin();
-                it != clist.end(); ++it) {
-            std::cout << *it << std::endl;
-        }
-        std::cout << "pipes" << std::endl;
-        for (int i = 0; i < plist.size(); ++i) {
-            std::cout << plist.at(i).read_bychild << " " << plist.at(i).write_byparent;
-            std::cout << " " << plist.at(i).read_byparent << " ";
-            std::cout << plist.at(i).write_bychild << std::endl;
-        }
+#ifdef VERBOSE
+    std::cout << "pipes" << std::endl;
+    for (int i = 0; i < plist.size(); ++i) {
+        std::cout << "pid: " << plist.at(i).child_pid << std::endl;
+        std::cout << plist.at(i).read_bychild << " " << plist.at(i).write_byparent;
+        std::cout << " " << plist.at(i).read_byparent << " ";
+        std::cout << plist.at(i).write_bychild << std::endl;
     }
+#endif
 
-    //pfdlist.at(1).write = fdopen(plist.at(1).write, "r");
-    infile.open("test-loves-labors-lost.txt"); // <-- lots of words
+}
+
+void Uniqify::parser() {
+    std::string word;
     pipesfd_t* pfdlist;
+    char readbuf [100];
+    int i = 0;
+    int eofs = 0;
+
+    infile.open("test2.txt"); // <-- lots of words
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
     if (pfdlist == NULL) {
-        std::cout << "malloc error: " << strerror(errno) << std::endl;
+        throw (Exception("malloc failed", __LINE__, errno));
     }
     for (int j = 0; j < numChildren; ++j) {
         close(plist.at(j).read_bychild);
         close(plist.at(j).write_bychild);
         pfdlist[j][PIPE_READ] = fdopen(plist.at(j).read_byparent, "r");
         if (pfdlist[j][PIPE_READ] == NULL) {
-            std::cout << "fdopen error, read: " << strerror(errno) << std::endl;
+            throw (Exception("fdopen failed", __LINE__, errno));
         }
         pfdlist[j][PIPE_WRITE] = fdopen(plist.at(j).write_byparent, "w");
         if (pfdlist[j][PIPE_WRITE] == NULL) {
-            std::cout << "fdopen error, write: " << strerror(errno) << std::endl;
+            throw (Exception("fdopen failed", __LINE__, errno));
         }
     }
-
-    /* Processing loop */
+    /* send input to the sort processes in a round-robin fashion */
     int k = 0;
-    while (infile >> word) {
+    while (!infile.eof()) {
+        infile >> word;
         word.append("\n");
         if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
-            std::cout << "fputs error, write: " << strerror(errno) << std::endl;
+            throw (Exception("fputs failed", __LINE__, errno));
         }
         (k == numChildren - 1) ? k = 0 : ++k;
     }
+
+    /* Close all the write pipes to flush the buffers */
     for (int l = 0; l < numChildren; ++l) {
         if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
-            std::cout << "fclose error, write: " << strerror(errno) << std::endl;
+            throw (Exception("fclose failed", __LINE__, errno));
         }
     }
-    std::cout << "now waiting for children to close\n";
-    char readbuf [100];
+
+    /* retreive all words from sort processes in a round-robin fashion */
     outfile.open("output.txt", std::ios::trunc);
-    int i = 0;
-    int eofs = 0;
+    i = 0;
     while (eofs != numChildren) {
         if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL && !feof(pfdlist[i][PIPE_READ])) {
-            std::cout << "fgets error, write: " << strerror(errno) << std::endl;
-            exit(EXIT_FAILURE);
+            throw (Exception("fgets failed", __LINE__, errno));
         }
         if (feof(pfdlist[i][PIPE_READ])) {
             if (fclose(pfdlist[i][PIPE_READ]) < 0) {
-                std::cout << "fclose error, read: " << strerror(errno) << std::endl;
+                throw (Exception("fclose failed", __LINE__, errno));
             }
             ++eofs;
         } else {
@@ -173,42 +186,58 @@ int main(int argc, char* argv[]) {
 
     outfile.close();
     infile.close();
+    free(pfdlist);
+}
+
+void Uniqify::suppressor() {
+    static std::string oldword = NULL;
+    std::string newword;
+    if (newword.compare(oldword) != 0) {
+        std::cout << oldword << newword << "\n";
+    }
+
 
     /* Wait for children to exit */
     int stillwating;
-    i = 0;
+    int i = 0;
     do {
         stillwating = 0;
-        if (clist.at(i) > 0) {
-            if (waitpid(clist.at(i), NULL, WNOHANG) == 0) {
-                clist.at(i) = 0; /* Child is done */
-                if (VERBOSE) {
-                    std::cout << "child " << i << " is done." << std::endl;
-                }
+        if (plist.at(i).child_pid > 0) {
+            if (waitpid(plist.at(i).child_pid, NULL, WNOHANG) == 0) {
+                plist.at(i).child_pid = 0; /* Child is done */
+#ifdef VERBOSE
+                std::cout << "child " << i << " is done." << std::endl;
+#endif
             } else {
                 /* Still waiting on this child */
                 stillwating = 1;
+#ifdef VERBOSE
+                std::cout << "still waiting on child " << i << std::endl;
+#endif
             }
         }
         /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
-        sleep(0);
+        sleep(0); // 0
         (i == numChildren - 1) ? i = 0 : ++i;
     } while (stillwating);
 
     /* Collect pipes, merge and remove duplicates */
-
-    return 0;
 }
 
-//std::vector<std::vector<int> > pipes(numChildren, std::vector<int> (2));
-//childPids = (pid_t*) malloc(numChildren * sizeof (pid_t));
-//std::vector<int> V(fd, fd + sizeof (fd) / sizeof (int));
-//pipes.at(i) = V;
-/*
-    FILE** name;
-    name = (FILE**) malloc(numChildren * 2 * sizeof (FILE*));
-    for (int i = 0; i < numChildren * 2; i = i + 2) {
-        name[i] = fdopen(plist.at(1).read_byparent, "r");
-        name[i + 1] = fdopen(plist.at(1).write_byparent, "w");
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cout << "USAGE: uniqify [num_sort_processes]";
+        //exit(EXIT_SUCCESS);
     }
- */
+    try {
+        Uniqify uniq(3);
+        uniq.fork_processes();
+        uniq.parser();
+        uniq.suppressor();
+    } catch (const Exception e) {
+        std::cout << std::endl << e.errmsg << ", " << strerror(e.cerrno);
+        std::cout << ", line " << e.errline << std::endl;
+    } catch (...) {
+        std::cout << "Error!" <<  std::endl;
+    }
+}
