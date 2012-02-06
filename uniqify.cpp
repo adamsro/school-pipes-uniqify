@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
             std::cout << "fclose error, write: " << strerror(errno) << std::endl;
         }
     }
-
+    std::cout << "now waiting for children to close\n";
     char readbuf [100];
     outfile.open("output.txt", std::ios::trunc);
     int i = 0;
