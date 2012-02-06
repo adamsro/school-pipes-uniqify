@@ -3,16 +3,12 @@
  * very helpful: http://tldp.org/LDP/lpg/node11.html
  * and: http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
  */
-#define _POSIX_SOURCE // needed?
-#include <vector>
-#include <iostream>
-#include <fstream>
-#include <cerrno>
-#include <stdio.h>
 
-#include <unistd.h>
-#include <sys/wait.h>
-#include <sys/types.h>
+#include <iostream>
+#include <vector>
+#include <cerrno>
+//#include <fstream>
+//#include <locale>
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
@@ -20,16 +16,15 @@
 
 class Exception {
 public:
+    std::string errmsg;
+    int cerrno;
+    int errline;
 
     Exception(std::string message, int line, int errnum = 0) {
         errmsg = message;
         cerrno = errnum;
         errline = line;
     }
-    std::string errmsg;
-    int cerrno;
-    int errline;
-
 };
 
 struct pipes_t {
@@ -45,22 +40,25 @@ class Uniqify {
     static const int PIPE_WRITE = 1;
     std::vector<pipes_t> plist;
     int numChildren;
-    std::ifstream infile;
-    std::ofstream outfile;
 
 public:
     Uniqify(int children);
-    void set_input_file(std::string infile);
-    void set_output_file(std::string outfile);
+    void run();
+protected:
     void fork_processes();
-    void parser();
-    void suppressor();
+    void parse();
+    void wait_for_children();
+    std::string normalize_str(std::string input);
 };
 
 Uniqify::Uniqify(int children) {
     numChildren = children;
-//    infile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-//    outfile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+}
+
+void Uniqify::run() {
+    fork_processes();
+    parse();
+    wait_for_children();
 }
 
 void Uniqify::fork_processes() {
@@ -92,18 +90,15 @@ void Uniqify::fork_processes() {
                 }
                 close(p.read_bychild);
 
-                //if (dup2(fd2[PIPE_WRITE], STDOUT_FILENO) != STDOUT_FILENO) {
                 if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
                     throw (Exception("dup2 failed", __LINE__, errno));
                 }
                 close(p.write_bychild);
 
-                execlp("sort", "sort", NULL); //execl("/usr/bin/sort", "sort");
-                //_exit(127); /* Failed exec, doesn't flush file desc */
-                exit(0);
+                execlp("sort", "sort", NULL); //"/usr/bin/sort"
+                _exit(127); /* Failed exec, doesn't flush file desc */
                 break;
             default: // is Parent
-                //clist.push_back(child_pid);
                 plist.at(i).child_pid = child_pid;
                 break;
         }
@@ -121,18 +116,19 @@ void Uniqify::fork_processes() {
 
 }
 
-void Uniqify::parser() {
+void Uniqify::parse() {
     std::string word;
     pipesfd_t* pfdlist;
     char readbuf [100];
     int i = 0;
     int eofs = 0;
+    std::string oldword;
 
-    infile.open("test2.txt"); // <-- lots of words
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
     if (pfdlist == NULL) {
         throw (Exception("malloc failed", __LINE__, errno));
     }
+    /* open the right pipes and close everything else */
     for (int j = 0; j < numChildren; ++j) {
         close(plist.at(j).read_bychild);
         close(plist.at(j).write_bychild);
@@ -147,7 +143,7 @@ void Uniqify::parser() {
     }
     /* send input to the sort processes in a round-robin fashion */
     int k = 0;
-    while (infile >> word) {
+    while (std::cin >> word) {
         word.append("\n");
         if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
             throw (Exception("fputs failed", __LINE__, errno));
@@ -161,10 +157,11 @@ void Uniqify::parser() {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
-    int pipes[2];
-    pipe(pipes);
+
+
     /* retreive all words from sort processes in a round-robin fashion */
     i = 0;
+    word = "";
     while (eofs != numChildren) {
         if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
             if (fclose(pfdlist[i][PIPE_READ]) < 0) {
@@ -172,28 +169,19 @@ void Uniqify::parser() {
             }
             ++eofs;
         } else {
-            //fd[PIPE_WRITE] << readbuf;
-            std::cout << readbuf;
-            //if (fwrite(readbuf, sizeof char, sizeof readbuf, fd[PIPE_WRITE] ) != sizeof(readbuf)) {
-            //}
-
-            //suppresser(readbuf);
+            /* Suppress duplicates if they are sequential */
+            oldword.assign(word);
+            word = readbuf;
+            if (oldword.compare(word) != 0) {
+                std::cout << word;
+            }
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
-    infile.close();
     free(pfdlist);
 }
 
-void Uniqify::suppressor() {
-    outfile.open("output.txt", std::ios::trunc);
-    outfile.close();
-    std::string oldword;
-    std::string newword;
-    if (newword.compare(oldword) != 0) {
-        std::cout << oldword << newword << "\n";
-    }
-
+void Uniqify::wait_for_children() {
 
     /* Wait for children to exit */
     int stillwating;
@@ -210,7 +198,7 @@ void Uniqify::suppressor() {
                 /* Still waiting on this child */
                 stillwating = 1;
 #ifdef VERBOSE
-                std::cout << "still waiting on child " << i << std::endl;
+                //        std::cout << "still waiting on child " << i << std::endl;
 #endif
             }
         }
@@ -222,20 +210,26 @@ void Uniqify::suppressor() {
     /* Collect pipes, merge and remove duplicates */
 }
 
+std::string Uniqify::normalize_str(std::string input) {
+    std::string output;
+    std::locale loc;
+    for (size_t i = 0; i < input.length(); ++i)
+        // output << tolower(input[i], loc);
+        return output;
+}
+
 int main(int argc, char* argv[]) {
     if (argc != 2) {
-        std::cout << "USAGE: uniqify [num_sort_processes]";
-        //exit(EXIT_SUCCESS);
+        std::cout << "USAGE: uniqify [num_sort_processes]\n";
+        exit(EXIT_SUCCESS);
     }
     try {
-        Uniqify uniq(3);
-        uniq.fork_processes();
-        uniq.parser();
-        uniq.suppressor();
+        Uniqify uniq(atoi(argv[1]));
+        uniq.run();
     } catch (const Exception e) {
         std::cout << std::endl << e.errmsg << ", " << strerror(e.cerrno);
         std::cout << ", line " << e.errline << std::endl;
     } catch (...) {
-        std::cout << "Error!" <<  std::endl;
+        std::cout << "Error!" << std::endl;
     }
 }
