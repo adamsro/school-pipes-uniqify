@@ -1,14 +1,12 @@
 /*
  *
- * very helpful: http://tldp.org/LDP/lpg/node11.html
+ * helpful: http://tldp.org/LDP/lpg/node11.html
  * and: http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
  */
 
 #include <iostream>
 #include <vector>
 #include <cerrno>
-//#include <fstream>
-//#include <locale>
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
@@ -47,6 +45,7 @@ public:
 protected:
     void fork_processes();
     void parse();
+    void supress_and_print(std::vector<std::string> words);
     void wait_for_children();
     std::string normalize_str(std::string input);
 };
@@ -85,15 +84,18 @@ void Uniqify::fork_processes() {
                 /* Culose stdin and duplicate PIPE_READ to this position*/
                 close(p.write_byparent);
                 close(p.read_byparent);
-                if (dup2(p.read_bychild, STDIN_FILENO) != STDIN_FILENO) {
-                    throw (Exception("dup2 failed", __LINE__, errno));
+                if (p.read_bychild != STDIN_FILENO) {
+                    if (dup2(p.read_bychild, STDIN_FILENO) != STDIN_FILENO) {
+                        throw (Exception("dup2 failed", __LINE__, errno));
+                    }
+                    close(p.read_bychild);
                 }
-                close(p.read_bychild);
-
-                if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
-                    throw (Exception("dup2 failed", __LINE__, errno));
+                if (p.write_bychild != STDOUT_FILENO) {
+                    if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
+                        throw (Exception("dup2 failed", __LINE__, errno));
+                    }
+                    close(p.write_bychild);
                 }
-                close(p.write_bychild);
 
                 execlp("sort", "sort", NULL); //"/usr/bin/sort"
                 _exit(127); /* Failed exec, doesn't flush file desc */
@@ -145,23 +147,23 @@ void Uniqify::parse() {
     int k = 0;
     while (std::cin >> word) {
         word.append("\n");
+        //word << tolower(word.c_str()); // check this?
+        std::transform(word.begin(), word.end(), word.begin(), (int(*)(int)) tolower);
         if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
             throw (Exception("fputs failed", __LINE__, errno));
         }
         (k == numChildren - 1) ? k = 0 : ++k;
     }
-
     /* Close all the write pipes to flush the buffers */
     for (int l = 0; l < numChildren; ++l) {
         if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
-
-
     /* retreive all words from sort processes in a round-robin fashion */
     i = 0;
     word = "";
+    std::vector<std::string> words;
     while (eofs != numChildren) {
         if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
             if (fclose(pfdlist[i][PIPE_READ]) < 0) {
@@ -169,20 +171,23 @@ void Uniqify::parse() {
             }
             ++eofs;
         } else {
-            /* Suppress duplicates if they are sequential */
-            oldword.assign(word);
-            word = readbuf;
-            if (oldword.compare(word) != 0) {
-                std::cout << word;
-            }
+            words.push_back(readbuf);
         }
         (i == numChildren - 1) ? i = 0 : ++i;
+    }
+    std::sort(words.begin(), words.end());
+    words.erase(std::unique(words.begin(), words.end()), words.end());
+    for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
+        std::cout << *it;
     }
     free(pfdlist);
 }
 
-void Uniqify::wait_for_children() {
+void Uniqify::supress_and_print(std::vector<std::string> words) {
 
+}
+
+void Uniqify::wait_for_children() {
     /* Wait for children to exit */
     int stillwating;
     int i = 0;
@@ -206,8 +211,6 @@ void Uniqify::wait_for_children() {
         sleep(0); // 0
         (i == numChildren - 1) ? i = 0 : ++i;
     } while (stillwating);
-
-    /* Collect pipes, merge and remove duplicates */
 }
 
 std::string Uniqify::normalize_str(std::string input) {
