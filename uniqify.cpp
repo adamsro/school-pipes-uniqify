@@ -205,9 +205,6 @@ void Uniqify::receive_input() {
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
-    std::cout << "-------------------\n";
-
-
 }
 
 void Uniqify::close_read_pipes() {
