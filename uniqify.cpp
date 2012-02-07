@@ -33,6 +33,13 @@ struct pipes_t {
 
 typedef FILE* pipesfd_t[2];
 
+bool notalpha(char c) {
+    if ((int(*)(int)) std::isalpha(c)) {
+        return false;
+    }
+    return true;
+}
+
 class Uniqify {
     static const int PIPE_READ = 0;
     static const int PIPE_WRITE = 1;
@@ -43,7 +50,7 @@ public:
     std::vector<std::string> words;
     Uniqify(int children);
     void run();
-    std::vector<std::string> get_words();
+    void print();
 protected:
     void pipe_and_fork();
     void open_pipes();
@@ -153,10 +160,12 @@ void Uniqify::send_input() {
     std::string word;
     int i = 0;
     while (std::cin >> word) {
-        word.append("\n");
-        //word << tolower(word.c_str()); // check this?
+        /* remove all no alpha charactors and transform all uppercase to lowercase */
+        word.erase(std::remove_if(word.begin(), word.end(), notalpha), word.end());
         std::transform(word.begin(), word.end(), word.begin(), (int(*)(int)) tolower);
+        word.append("\n");
         if (fputs(word.c_str(), pfdlist[i][PIPE_WRITE]) < 0) {
+
             throw (Exception("fputs failed", __LINE__, errno));
         }
         (i == numChildren - 1) ? i = 0 : ++i;
@@ -167,6 +176,7 @@ void Uniqify::send_input() {
 void Uniqify::close_write_pipes() {
     for (int l = 0; l < numChildren; ++l) {
         if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
+
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
@@ -174,6 +184,8 @@ void Uniqify::close_write_pipes() {
 
 /* retreive all words from sort processes in a round-robin fashion */
 void Uniqify::receive_input() {
+    static const int WORD_RESIZE = 50;
+    words.resize(WORD_RESIZE);
     char readbuf [100];
     int i = 0;
     int eofs = 0;
@@ -182,15 +194,26 @@ void Uniqify::receive_input() {
             ++eofs;
         } else {
             words.push_back(readbuf);
+            //std::cout << readbuf;
+            if (words.size() % 50 == 0) {
+                if (words.size() + WORD_RESIZE < words.max_size()) {
+                    words.resize(words.size() + WORD_RESIZE);
+                } else {
+                    throw (Exception("Exceed max vector size", __LINE__));
+                }
+            }
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
+    std::cout << "-------------------\n";
+
 
 }
 
 void Uniqify::close_read_pipes() {
     for (int i = 0; i < numChildren; ++i) {
         if (fclose(pfdlist[i][PIPE_READ]) < 0) {
+
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
@@ -199,35 +222,37 @@ void Uniqify::close_read_pipes() {
 void Uniqify::sort_and_unique() {
     std::sort(words.begin(), words.end());
     words.erase(std::unique(words.begin(), words.end()), words.end());
+    for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
+        std::cout << *it;
+    }
 }
 
+/* Wait for children to exit */
 void Uniqify::wait_for_children() {
-    /* Wait for children to exit */
-    int stillwating;
+    int numended = 0;
     int i = 0;
     do {
-        stillwating = 0;
         if (plist.at(i).child_pid > 0) {
             if (waitpid(plist.at(i).child_pid, NULL, WNOHANG) == 0) {
                 plist.at(i).child_pid = 0; /* Child is done */
+                ++numended;
 #ifdef VERBOSE
                 std::cout << "child " << i << " is done." << std::endl;
 #endif
-            } else {
-                /* Still waiting on this child */
-                stillwating = 1;
+            } else { /* Still waiting on this child */
 #ifdef VERBOSE
-                //        std::cout << "still waiting on child " << i << std::endl;
+                //std::cout << "still waiting on child " << i << " pid: " << plist.at(i).child_pid << std::endl;
 #endif
             }
         }
         /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
         sleep(0); // 0
         (i == numChildren - 1) ? i = 0 : ++i;
-    } while (stillwating);
+    } while (numended != numChildren - 1);
 }
-std::vector<std::string> Uniqify::get_words(){
-    return words;
+
+void Uniqify::print() {
+
 }
 
 int main(int argc, char* argv[]) {
@@ -238,10 +263,7 @@ int main(int argc, char* argv[]) {
     try {
         Uniqify uniq(atoi(argv[1]));
         uniq.run();
-        std::vector<std::string> words = uniq.get_words();
-        for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
-            std::cout << *it;
-        }
+        //uniq.print();
     } catch (const Exception e) {
         std::cout << std::endl << e.errmsg << ", " << strerror(e.cerrno);
         std::cout << ", line " << e.errline << std::endl;
