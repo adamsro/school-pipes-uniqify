@@ -38,16 +38,21 @@ class Uniqify {
     static const int PIPE_WRITE = 1;
     std::vector<pipes_t> plist;
     int numChildren;
-
+    pipesfd_t* pfdlist;
 public:
+    std::vector<std::string> words;
     Uniqify(int children);
     void run();
+    std::vector<std::string> get_words();
 protected:
     void pipe_and_fork();
-    void parse();
-    void supress_and_print(std::vector<std::string> words);
+    void open_pipes();
+    void send_input();
+    void close_write_pipes();
+    void receive_input();
+    void close_read_pipes();
+    void sort_and_unique();
     void wait_for_children();
-    std::string normalize_str(std::string input);
 };
 
 Uniqify::Uniqify(int children) {
@@ -56,7 +61,17 @@ Uniqify::Uniqify(int children) {
 
 void Uniqify::run() {
     pipe_and_fork();
-    parse();
+    pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
+    if (pfdlist == NULL) {
+        throw (Exception("malloc failed", __LINE__, errno));
+    }
+    open_pipes();
+    send_input();
+    close_write_pipes();
+    receive_input();
+    close_read_pipes();
+    free(pfdlist);
+    sort_and_unique();
     wait_for_children();
 }
 
@@ -96,7 +111,6 @@ void Uniqify::pipe_and_fork() {
                     }
                     close(p.write_bychild);
                 }
-
                 execlp("sort", "sort", NULL); //"/usr/bin/sort"
                 _exit(127); /* Failed exec, doesn't flush file desc */
                 break;
@@ -118,19 +132,8 @@ void Uniqify::pipe_and_fork() {
 
 }
 
-void Uniqify::parse() {
-    std::string word;
-    pipesfd_t* pfdlist;
-    char readbuf [100];
-    int i = 0;
-    int eofs = 0;
-    std::string oldword;
-
-    pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
-    if (pfdlist == NULL) {
-        throw (Exception("malloc failed", __LINE__, errno));
-    }
-    /* open the right pipes and close everything else */
+/* open the right pipes and close everything else */
+void Uniqify::open_pipes() {
     for (int j = 0; j < numChildren; ++j) {
         close(plist.at(j).read_bychild);
         close(plist.at(j).write_bychild);
@@ -143,48 +146,59 @@ void Uniqify::parse() {
             throw (Exception("fdopen failed", __LINE__, errno));
         }
     }
-    /* send input to the sort processes in a round-robin fashion */
-    int k = 0;
+}
+
+/* send input to the sort processes in a round-robin fashion */
+void Uniqify::send_input() {
+    std::string word;
+    int i = 0;
     while (std::cin >> word) {
         word.append("\n");
         //word << tolower(word.c_str()); // check this?
         std::transform(word.begin(), word.end(), word.begin(), (int(*)(int)) tolower);
-        if (fputs(word.c_str(), pfdlist[k][PIPE_WRITE]) < 0) {
+        if (fputs(word.c_str(), pfdlist[i][PIPE_WRITE]) < 0) {
             throw (Exception("fputs failed", __LINE__, errno));
         }
-        (k == numChildren - 1) ? k = 0 : ++k;
+        (i == numChildren - 1) ? i = 0 : ++i;
     }
-    /* Close all the write pipes to flush the buffers */
+}
+
+/* Close all the write pipes to flush the buffers */
+void Uniqify::close_write_pipes() {
     for (int l = 0; l < numChildren; ++l) {
         if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
-    /* retreive all words from sort processes in a round-robin fashion */
-    i = 0;
-    word = "";
-    std::vector<std::string> words;
+}
+
+/* retreive all words from sort processes in a round-robin fashion */
+void Uniqify::receive_input() {
+    char readbuf [100];
+    int i = 0;
+    int eofs = 0;
     while (eofs != numChildren) {
         if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
-            if (fclose(pfdlist[i][PIPE_READ]) < 0) {
-                throw (Exception("fclose failed", __LINE__, errno));
-            }
             ++eofs;
         } else {
             words.push_back(readbuf);
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
-    std::sort(words.begin(), words.end());
-    words.erase(std::unique(words.begin(), words.end()), words.end());
-    for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
-        std::cout << *it;
-    }
-    free(pfdlist);
+
 }
 
-void Uniqify::supress_and_print(std::vector<std::string> words) {
+void Uniqify::close_read_pipes() {
+    for (int i = 0; i < numChildren; ++i) {
+        if (fclose(pfdlist[i][PIPE_READ]) < 0) {
+            throw (Exception("fclose failed", __LINE__, errno));
+        }
+    }
+}
 
+void Uniqify::sort_and_unique() {
+    std::sort(words.begin(), words.end());
+    words.erase(std::unique(words.begin(), words.end()), words.end());
 }
 
 void Uniqify::wait_for_children() {
@@ -212,13 +226,8 @@ void Uniqify::wait_for_children() {
         (i == numChildren - 1) ? i = 0 : ++i;
     } while (stillwating);
 }
-
-std::string Uniqify::normalize_str(std::string input) {
-    std::string output;
-    std::locale loc;
-    for (size_t i = 0; i < input.length(); ++i)
-        // output << tolower(input[i], loc);
-        return output;
+std::vector<std::string> Uniqify::get_words(){
+    return words;
 }
 
 int main(int argc, char* argv[]) {
@@ -229,6 +238,10 @@ int main(int argc, char* argv[]) {
     try {
         Uniqify uniq(atoi(argv[1]));
         uniq.run();
+        std::vector<std::string> words = uniq.get_words();
+        for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
+            std::cout << *it;
+        }
     } catch (const Exception e) {
         std::cout << std::endl << e.errmsg << ", " << strerror(e.cerrno);
         std::cout << ", line " << e.errline << std::endl;
