@@ -1,7 +1,6 @@
-% Robert Adams	01/20/2012	CS 311
+% Robert Adams	02/07/2012	CS 311
 
-\documentclass[letterpaper,10pt,twocolumn,titlepage]{article}
-
+\documentclass[letterpaper,10pt]{article} %twocolumn titlepage 
 \usepackage{graphicx}
 \usepackage{amssymb}
 \usepackage{amsmath}
@@ -47,13 +46,30 @@
   \maketitle
 
 
-\section{Abstract}
+\section{Design Decisions}
+
+
+    To try to write code which was possibly, slightly, more modular I wrote all the primary functionality into a class. Aside from looking cleaner, I am now able to throw Exceptions and handle the formatting all in the same place. The process really rather procedural by nature though, so the run method really only wraps a series of functions which must execute in order.
+
+
+    I used a struct to hold the child’s id and all pipes then stored a copy of this struct in a vector for every pipe created. This made it much easier for me to keep things organized.  I also created a typedef to group the read and write file descriptors for a process, which I felt made things a bit more clear. I ended up, however, using malloc for the file descriptor array because I wasn’t able to get this working with a vector... probably because I couldn't figure out the syntax.
+
+
+    As I pulled data from the sort processes pipes I stored the resulting words in a vector. I then iterated through the vector with std::sort, which with the GNU compiler is apparently introsort, about n log n complexity. I then used std::vector<T>.erase with std::unique to remove all duplicates, probably a bit more then ‘n’ time. All and all the process of calling sort multiple times, then loading into an array and calling sort again seems very inefficient, I wasn’t, however, able to come up with a faster way.
+
+\section{Difficulties}
+
+
+    Keeping track of which pipes go where and when to close what was definitely confusing. If I were to do this again I would try fifos. On a related matter I still haven't figured out why some of my processes are not terminating.  My loop eventuality calls break; and unleashes some zombies.
+
+
+    When timing the results I found that I can call up to 60 sort processes on smaller files, and the timings are about the same as 1 sort process. I cannot call any more then one sort process on larger files. Although only speculation, I believe this have something  to do with calling sort on the vector. 
 
   \begin{figure}[p]
     \centering
-    \input{plot}
-    \caption{Number of words vs. runtimes. }
-    \label{runtime-plot}
+    \input{plot.tex}
+%    \caption{number of words vs. runtimes. }
+    \label{runtimes}
   \end{figure}
 
 
@@ -62,15 +78,20 @@
     \begin{tabular}{ |l|l| }
 \hline
         Date                           & Description                                                                  \\ \hline
-        Fri Jan 20 22:52:11 2012 -0800 &  added writeup in main.tex. include pdf                                      \\
-        Fri Jan 20 21:05:40 2012 -0800 & added file over-write confirmation. will not write to file with this enabled \\
-        Fri Jan 20 17:42:49 2012 -0800 & add instructions for gnuplot. comment out max-file-size output               \\
-        Fri Jan 20 17:28:07 2012 -0800 & buffer size dec as max-file-size. no realloc. works, no seg fault            \\
-        Wed Jan 18 21:54:08 2012 -0800 & refactored into function. added basic timing code.                           \\
-        Tue Jan 17 17:41:01 2012 -0800 & added blank tex writeup file and Make rules. compiles                        \\
-        Tue Jan 17 12:31:05 2012 -0800 & finally working. used result of fread  result of fread for fwrite.           \\
-        Mon Jan 16 10:36:14 2012 -0800 & using ifstream and ofstream. no compile.                                     \\
-        Sat Jan 14 18:09:22 2012 -0800 & compiles Hello World                                                         \\
+        Tue Feb 7 17:51:10 2012 -0800  &   added timing code, started writeup           \\
+        Tue Feb 7 14:00:36 2012 -0800 &     vector resizes                      \\
+        Mon Feb 6 23:59:49 2012 -0800  &     refactor into smaller methods             \\
+        Mon Feb 6 23:26:29 2012 -0800 &      Merge branch 'master' of github.com:adamsro/cs311-assign2-uniqify \\
+        Mon Feb 6 23:23:42 2012 -0800  &     added transform tolower for in string, added sort and supress functionality        \\
+        Sun Feb 5 17:02:37 2012 -0800   &   merge refactor to master \\
+        Sun Feb 5 16:09:32 2012 -0800   &   better exception handling. pipes not flushing correctly?        \\
+        Sun Feb 5 13:44:17 2012 -0800   &       refactored into class. sorts correctly, no suppressor       \\
+        Sat Feb 4 15:21:54 2012 -0800   &    fgets and fputs piped correctly. Correct output for suppressor. infinat fputs loop \\
+        Sat Feb 4 09:33:57 2012 -0800   &   working fdopen and fputs? broken fgets?     \\
+        Thu Feb 2 17:30:28 2012 -0800   &  vecotrs store pids and pipenums. need fdopen and suppress function.  \\
+        Wed Feb 1 23:19:15 2012 -0800   &   general structure. rough, does not compile.       \\
+        Fri Jan 27 18:03:51 2012 -0800  &       basic code for forking process      \\
+        Fri Jan 27 10:25:10 2012 -0800  &   Hello World!  \\
 \hline
     \end{tabular}
 \caption{Pulled from git commit log.}\label{commit-logs}

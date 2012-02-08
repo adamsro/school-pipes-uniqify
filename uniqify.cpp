@@ -1,4 +1,11 @@
 /*
+ * Original Author: Robert M Adams (adamsro)
+ * File: uniqify.cpp
+ * Created: 2012 Feb 1, 18:35 by adamsro
+ * Last Modified: 2012 Feb 7, 20:00 by adamsro
+ *
+ * File contains a filter which spawns n sort processses based on a command
+ * line argument. The primary purpose of this is project to learn pipes.
  *
  * helpful: http://tldp.org/LDP/lpg/node11.html
  * and: http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
@@ -34,6 +41,7 @@ struct pipes_t {
 
 typedef FILE* pipesfd_t[2];
 
+/* return true if ! alphapetic char. for a filter */
 bool notalpha(char c) {
     if ((int(*)(int)) std::isalpha(c)) {
         return false;
@@ -60,7 +68,7 @@ protected:
     void close_write_pipes();
     void receive_input();
     void close_read_pipes();
-    void sort_unique_print();
+    void sort_unique();
     void wait_for_children();
 };
 
@@ -68,6 +76,7 @@ Uniqify::Uniqify(int children) {
     numChildren = children;
 }
 
+/* get this mess in motion */
 void Uniqify::run() {
     pipe_and_fork();
     pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
@@ -80,7 +89,7 @@ void Uniqify::run() {
     receive_input();
     close_read_pipes();
     free(pfdlist);
-    sort_unique_print();
+    sort_unique();
     wait_for_children();
 }
 
@@ -105,7 +114,7 @@ void Uniqify::pipe_and_fork() {
             case -1:
                 throw (Exception("fork failed", __LINE__, errno));
             case 0: // is Child
-                /* Close stdin and duplicate PIPE_READ to this position*/
+                /* Close stdin and duplicate PIPE_READ to this position */
                 close(p.write_byparent);
                 close(p.read_byparent);
                 if (p.read_bychild != STDIN_FILENO) {
@@ -114,6 +123,7 @@ void Uniqify::pipe_and_fork() {
                     }
                     close(p.read_bychild);
                 }
+                /* Close stdout and duplicate PIPE_WRITE to this position */
                 if (p.write_bychild != STDOUT_FILENO) {
                     if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
                         throw (Exception("dup2 failed", __LINE__, errno));
@@ -198,19 +208,11 @@ void Uniqify::receive_input() {
             ++eofs;
         } else {
             words.push_back(readbuf);
-            //std::cout << readbuf;
-            if (words.size() % 50 == 0) {
-                if (words.size() + WORD_RESIZE < words.max_size()) {
-                    words.resize(words.size() + WORD_RESIZE);
-                } else {
-                    throw (Exception("Exceed max vector size", __LINE__));
-                }
-            }
         }
         (i == numChildren - 1) ? i = 0 : ++i;
     }
 }
-
+/* Close pipes so processes will complete */
 void Uniqify::close_read_pipes() {
     for (int i = 0; i < numChildren; ++i) {
         if (fclose(pfdlist[i][PIPE_READ]) < 0) {
@@ -219,7 +221,7 @@ void Uniqify::close_read_pipes() {
     }
 }
 
-void Uniqify::sort_unique_print() {
+void Uniqify::sort_unique() {
     std::sort(words.begin(), words.end());
     words.erase(std::unique(words.begin(), words.end()), words.end());
 }
@@ -246,13 +248,13 @@ void Uniqify::wait_for_children() {
         /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
         sleep(0); // 0
         if (loops == 50) {
-            break;
-        } /* Zombies!!! */
+            break; /* Zombies!!! */
+        }
         ++loops;
         (i == numChildren - 1) ? i = 0 : ++i;
     } while (numended != numChildren - 1);
 }
-
+/* Get the output. */
 void Uniqify::print() {
     for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
         std::cout << *it;
@@ -266,8 +268,6 @@ int main(int argc, char* argv[]) {
     }
     clock_t start;
     clock_t theend;
-    std::string file;
-
     try {
         start = clock();
         Uniqify uniq(atoi(argv[1]));
@@ -275,8 +275,11 @@ int main(int argc, char* argv[]) {
         uniq.print();
         theend = clock();
         std::cout << std::endl << uniq.num_words_parsed << "\t";
+        /* Measure with clock cycles, then divide by clocks-per-sec for
+         * result in sec. more accurate. */
         std::cout << (((double) (theend - start)) / CLOCKS_PER_SEC) << std::endl;
     } catch (const Exception e) {
+        /* format error for terminal output */
         std::cout << std::endl << e.errmsg << ", " << strerror(e.cerrno);
         std::cout << ", line " << e.errline << std::endl;
     } catch (...) {
