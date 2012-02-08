@@ -10,16 +10,24 @@
  * helpful: http://tldp.org/LDP/lpg/node11.html
  * and: http://stackoverflow.com/questions/1381089/multiple-fork-concurrency
  */
-
+#include <stdio.h>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 #include <cerrno>
 #include <math.h>
+#include <algorithm>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
-//#define VERBOSE = 0;
+#define VERBOSE = 1;
 
+namespace std {
+  using ::fdopen;
+}
 class Exception {
 public:
     std::string errmsg;
@@ -79,7 +87,7 @@ Uniqify::Uniqify(int children) {
 /* get this mess in motion */
 void Uniqify::run() {
     pipe_and_fork();
-    pfdlist = (pipesfd_t*) malloc(numChildren * sizeof (pipesfd_t));
+    pfdlist = (pipesfd_t*) std::malloc(numChildren * sizeof (pipesfd_t));
     if (pfdlist == NULL) {
         throw (Exception("malloc failed", __LINE__, errno));
     }
