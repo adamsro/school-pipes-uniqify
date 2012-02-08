@@ -1,0 +1,10 @@
+set terminal latex
+set output "plot.tex"
+set style data lp
+set size 1,1 
+set log x
+set origin 0.0,0.0
+set nokey
+set xlabel "buffer size"
+#set ylabel "seconds"
+plot 'runtimes.out', 'runtimes.out'

@@ -7,10 +7,11 @@
 #include <iostream>
 #include <vector>
 #include <cerrno>
+#include <math.h>
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
-#define VERBOSE = 1;
+//#define VERBOSE = 0;
 
 class Exception {
 public:
@@ -47,6 +48,7 @@ class Uniqify {
     int numChildren;
     pipesfd_t* pfdlist;
 public:
+    int num_words_parsed;
     std::vector<std::string> words;
     Uniqify(int children);
     void run();
@@ -58,7 +60,7 @@ protected:
     void close_write_pipes();
     void receive_input();
     void close_read_pipes();
-    void sort_and_unique();
+    void sort_unique_print();
     void wait_for_children();
 };
 
@@ -78,7 +80,7 @@ void Uniqify::run() {
     receive_input();
     close_read_pipes();
     free(pfdlist);
-    sort_and_unique();
+    sort_unique_print();
     wait_for_children();
 }
 
@@ -103,7 +105,7 @@ void Uniqify::pipe_and_fork() {
             case -1:
                 throw (Exception("fork failed", __LINE__, errno));
             case 0: // is Child
-                /* Culose stdin and duplicate PIPE_READ to this position*/
+                /* Close stdin and duplicate PIPE_READ to this position*/
                 close(p.write_byparent);
                 close(p.read_byparent);
                 if (p.read_bychild != STDIN_FILENO) {
@@ -159,6 +161,7 @@ void Uniqify::open_pipes() {
 void Uniqify::send_input() {
     std::string word;
     int i = 0;
+    num_words_parsed = 0;
     while (std::cin >> word) {
         /* remove all no alpha charactors and transform all uppercase to lowercase */
         word.erase(std::remove_if(word.begin(), word.end(), notalpha), word.end());
@@ -168,6 +171,7 @@ void Uniqify::send_input() {
 
             throw (Exception("fputs failed", __LINE__, errno));
         }
+        ++num_words_parsed;
         (i == numChildren - 1) ? i = 0 : ++i;
     }
 }
@@ -210,24 +214,21 @@ void Uniqify::receive_input() {
 void Uniqify::close_read_pipes() {
     for (int i = 0; i < numChildren; ++i) {
         if (fclose(pfdlist[i][PIPE_READ]) < 0) {
-
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
 }
 
-void Uniqify::sort_and_unique() {
+void Uniqify::sort_unique_print() {
     std::sort(words.begin(), words.end());
     words.erase(std::unique(words.begin(), words.end()), words.end());
-    for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
-        std::cout << *it;
-    }
 }
 
 /* Wait for children to exit */
 void Uniqify::wait_for_children() {
     int numended = 0;
     int i = 0;
+    int loops = 0;
     do {
         if (plist.at(i).child_pid > 0) {
             if (waitpid(plist.at(i).child_pid, NULL, WNOHANG) == 0) {
@@ -244,12 +245,18 @@ void Uniqify::wait_for_children() {
         }
         /* Give up timeslice and prevent hard loop: this may not work on all flavors of Unix */
         sleep(0); // 0
+        if (loops == 50) {
+            break;
+        } /* Zombies!!! */
+        ++loops;
         (i == numChildren - 1) ? i = 0 : ++i;
     } while (numended != numChildren - 1);
 }
 
 void Uniqify::print() {
-
+    for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
+        std::cout << *it;
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -257,10 +264,18 @@ int main(int argc, char* argv[]) {
         std::cout << "USAGE: uniqify [num_sort_processes]\n";
         exit(EXIT_SUCCESS);
     }
+    clock_t start;
+    clock_t theend;
+    std::string file;
+
     try {
+        start = clock();
         Uniqify uniq(atoi(argv[1]));
         uniq.run();
-        //uniq.print();
+        uniq.print();
+        theend = clock();
+        std::cout << std::endl << uniq.num_words_parsed << "\t";
+        std::cout << (((double) (theend - start)) / CLOCKS_PER_SEC) << std::endl;
     } catch (const Exception e) {
         std::cout << std::endl << e.errmsg << ", " << strerror(e.cerrno);
         std::cout << ", line " << e.errline << std::endl;
