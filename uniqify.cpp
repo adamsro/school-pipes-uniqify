@@ -83,10 +83,10 @@ Uniqify::Uniqify(int children) {
     num_children = children;
 }
 
-/* function first forks all sorts, then forks parser (starts parsing), continues to suppressor */
+/* function forks children, parses cin, then when pipes, cout sorted, suppressed words */
 void Uniqify::run() {
-//    pid_t child_pid;
-//    int status;
+    //    pid_t child_pid;
+    //    int status;
     pipesfd_t* pfdlist;
 
     pfdlist = (pipesfd_t*) std::malloc(num_children * sizeof (pipesfd_t));
@@ -95,8 +95,8 @@ void Uniqify::run() {
     }
     fork_all_sorts();
 
-    fdopen_read_pipes( pfdlist);
-    fdopen_write_pipes( pfdlist);
+    fdopen_read_pipes(pfdlist);
+    fdopen_write_pipes(pfdlist);
 
     parser(pfdlist);
     fclose_write_pipes(pfdlist);
@@ -104,26 +104,7 @@ void Uniqify::run() {
     suppressor(pfdlist);
     fclose_read_pipes(pfdlist);
 
-    wait_for_children(); /* wait for all sort children */
-
-    //    switch (child_pid = fork()) {
-    //        case -1:
-    //            throw (Exception("fork failed", __LINE__, errno));
-    //        case 0: // is Child
-    //            parser(pfdlist);
-    //            fclose_write_pipes(pfdlist);
-    //            /*wait for all sort procs to complete */
-    //            exit(0);
-    //        default: // is Parent
-    //            suppressor(pfdlist);
-    //            fclose_read_pipes(pfdlist);
-    //            if ((waitpid(child_pid, &status, 0)) == -1) { /*wait for parser */
-    //                throw (Exception("waitpid error", __LINE__, errno));
-    //            }
-    //            wait_for_children(); /* wait for all sort children */
-    //            break;
-    //    }
-
+     wait_for_children();
     free(pfdlist);
 }
 
@@ -190,7 +171,7 @@ void Uniqify::parser(pipesfd_t* pfdlist) {
     std::string word;
     int i = 0;
     num_words_parsed = 0;
-    //std::ifstream file("test.txt");
+//    std::ifstream file("test.txt");
     while (std::cin >> word) {
         /* remove all no alpha charactors and transform all uppercase to lowercase */
         word.erase(std::remove_if(word.begin(), word.end(), notalpha), word.end());
@@ -203,7 +184,6 @@ void Uniqify::parser(pipesfd_t* pfdlist) {
         ++num_words_parsed;
         (i == num_children - 1) ? i = 0 : ++i;
     }
-    //file.close();
 }
 
 /* retreive all words from sort processes in a round-robin fashion */
@@ -215,7 +195,7 @@ void Uniqify::suppressor(pipesfd_t* pfdlist) {
     char readbuf [100];
     int i = 0;
     while (eofs != num_children) {
-        /* if pipe has never been read or is not already empty, read it for the first time */
+        /* if pipe has never been read, read it for the first time */
         if (temp.at(i) == "") {
             if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
                 ++eofs;
@@ -236,7 +216,6 @@ void Uniqify::suppressor(pipesfd_t* pfdlist) {
                 std::cout << temp.at(largest);
                 oldword.assign(temp.at(largest));
             }
-
             if (fgets(readbuf, sizeof readbuf, pfdlist[largest][PIPE_READ]) == NULL) {
                 ++eofs;
                 temp.at(largest) = CHAR_MIN;
@@ -247,7 +226,7 @@ void Uniqify::suppressor(pipesfd_t* pfdlist) {
         (i == num_children - 1) ? i = 0 : ++i;
     }
 }
-
+/* used for debugging */
 void Uniqify::print_vector(std::vector<std::string> temp) {
     std::cout << "arr: ";
     for (int i = 0; i < (int) temp.size(); ++i) {
