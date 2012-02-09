@@ -72,9 +72,9 @@ public:
 protected:
     void pipe_and_fork();
     void open_pipes();
-    void send_input();
+    void parser();
     void close_write_pipes();
-    void receive_input();
+    void suppressor();
     void close_read_pipes();
     void sort_unique();
     void wait_for_children();
@@ -92,12 +92,11 @@ void Uniqify::run() {
         throw (Exception("malloc failed", __LINE__, errno));
     }
     open_pipes();
-    send_input();
+    parser();
     close_write_pipes();
-    receive_input();
+    suppressor();
     close_read_pipes();
     free(pfdlist);
-    sort_unique();
     wait_for_children();
 }
 
@@ -176,7 +175,7 @@ void Uniqify::open_pipes() {
 }
 
 /* send input to the sort processes in a round-robin fashion */
-void Uniqify::send_input() {
+void Uniqify::parser() {
     std::string word;
     int i = 0;
     num_words_parsed = 0;
@@ -207,7 +206,8 @@ void Uniqify::close_write_pipes() {
 }
 
 /* retreive all words from sort processes in a round-robin fashion */
-void Uniqify::receive_input() {
+void Uniqify::suppressor() {
+    std::string oldword;
     int largest = 0;
     std::vector<std::string> temp(num_children, "");
     int eofs = 0;
@@ -230,7 +230,12 @@ void Uniqify::receive_input() {
         /* when one complete loop has been made, print the largest and load a new word into its spot. */
         if (i == num_children - 1) {
             //print_vector(temp);
-            std::cout << temp.at(largest);
+            // if this word is the same as the word before it, ignore it and move on.
+            if(temp.at(largest).compare(oldword) != 0) {
+                std::cout << temp.at(largest);
+                oldword.assign(temp.at(largest));
+            }
+
             if (fgets(readbuf, sizeof readbuf, pfdlist[largest][PIPE_READ]) == NULL) {
                 ++eofs;
                 temp.at(largest) = CHAR_MIN;
@@ -259,12 +264,6 @@ void Uniqify::close_read_pipes() {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
-}
-
-void Uniqify::sort_unique() {
-
-    std::sort(words.begin(), words.end());
-    words.erase(std::unique(words.begin(), words.end()), words.end());
 }
 
 /* Wait for children to exit */
