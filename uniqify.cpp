@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <cstdlib>
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <cerrno>
 #include <math.h>
@@ -20,14 +21,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <string.h>
+#include <limits.h>
 
 #define NUM_OF(x) (sizeof (x) / sizeof *(x))
 
 #define VERBOSE = 1;
 
-namespace std {
-  using ::fdopen;
-}
 class Exception {
 public:
     std::string errmsg;
@@ -61,7 +60,7 @@ class Uniqify {
     static const int PIPE_READ = 0;
     static const int PIPE_WRITE = 1;
     std::vector<pipes_t> plist;
-    int numChildren;
+    int num_children;
     pipesfd_t* pfdlist;
 public:
     int num_words_parsed;
@@ -69,6 +68,7 @@ public:
     Uniqify(int children);
     void run();
     void print();
+    void print_vector(std::vector<std::string> temp);
 protected:
     void pipe_and_fork();
     void open_pipes();
@@ -81,13 +81,13 @@ protected:
 };
 
 Uniqify::Uniqify(int children) {
-    numChildren = children;
+    num_children = children;
 }
 
 /* get this mess in motion */
 void Uniqify::run() {
     pipe_and_fork();
-    pfdlist = (pipesfd_t*) std::malloc(numChildren * sizeof (pipesfd_t));
+    pfdlist = (pipesfd_t*) std::malloc(num_children * sizeof (pipesfd_t));
     if (pfdlist == NULL) {
         throw (Exception("malloc failed", __LINE__, errno));
     }
@@ -107,7 +107,7 @@ void Uniqify::pipe_and_fork() {
     pid_t child_pid;
 
     /* Fork all the children and save their id's*/
-    for (int i = 0; i < numChildren; ++i) {
+    for (int i = 0; i < num_children; ++i) {
         if ((pipe(fd1) < 0) || (pipe(fd2) < 0)) {
             throw (Exception("pipe failed", __LINE__, errno));
         }
@@ -161,7 +161,7 @@ void Uniqify::pipe_and_fork() {
 
 /* open the right pipes and close everything else */
 void Uniqify::open_pipes() {
-    for (int j = 0; j < numChildren; ++j) {
+    for (int j = 0; j < num_children; ++j) {
         close(plist.at(j).read_bychild);
         close(plist.at(j).write_bychild);
         pfdlist[j][PIPE_READ] = fdopen(plist.at(j).read_byparent, "r");
@@ -180,6 +180,7 @@ void Uniqify::send_input() {
     std::string word;
     int i = 0;
     num_words_parsed = 0;
+    //std::ifstream file("test.txt");
     while (std::cin >> word) {
         /* remove all no alpha charactors and transform all uppercase to lowercase */
         word.erase(std::remove_if(word.begin(), word.end(), notalpha), word.end());
@@ -190,13 +191,14 @@ void Uniqify::send_input() {
             throw (Exception("fputs failed", __LINE__, errno));
         }
         ++num_words_parsed;
-        (i == numChildren - 1) ? i = 0 : ++i;
+        (i == num_children - 1) ? i = 0 : ++i;
     }
+    //file.close();
 }
 
 /* Close all the write pipes to flush the buffers */
 void Uniqify::close_write_pipes() {
-    for (int l = 0; l < numChildren; ++l) {
+    for (int l = 0; l < num_children; ++l) {
         if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
 
             throw (Exception("fclose failed", __LINE__, errno));
@@ -206,30 +208,65 @@ void Uniqify::close_write_pipes() {
 
 /* retreive all words from sort processes in a round-robin fashion */
 void Uniqify::receive_input() {
-    static const int WORD_RESIZE = 50;
-    words.resize(WORD_RESIZE);
+    int largest = 0;
+    std::vector<std::string> temp(num_children, "");
+    std::vector<bool> eof_num(num_children, false);
+    int eofs = 0;
     char readbuf [100];
     int i = 0;
-    int eofs = 0;
-    while (eofs != numChildren) {
-        if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
-            ++eofs;
-        } else {
-            words.push_back(readbuf);
+    while (eofs != num_children) {
+        /* if pipe has never been read or is not already empty, read it for the first time */
+        if (temp.at(i) == "") {
+            if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
+                eof_num.at(i) = true;
+                ++eofs;
+                temp.at(i) = CHAR_MIN;
+            } else {
+                temp.at(i) = readbuf;
+            }
         }
-        (i == numChildren - 1) ? i = 0 : ++i;
+        /* get the largeset of all n pipes */
+        if (i == 0 || temp.at(i).compare(temp.at(largest)) < 0) {
+            largest = i;
+        }
+        /* when one complete loop has been made, print the largest and load a new word into its spot. */
+        if (i == num_children - 1) {
+            //print_vector(temp);
+            std::cout << temp.at(largest);
+            if (fgets(readbuf, sizeof readbuf, pfdlist[largest][PIPE_READ]) == NULL) {
+                eof_num.at(largest) = true;
+                ++eofs;
+                temp.at(largest) = CHAR_MIN;
+            } else {
+                temp.at(largest) = readbuf;
+            }
+        }
+        (i == num_children - 1) ? i = 0 : ++i;
     }
 }
+
+void Uniqify::print_vector(std::vector<std::string> temp) {
+    std::cout << "arr: ";
+    for (int i = 0; i < temp.size(); ++i) {
+
+        temp.at(i).erase(std::remove(temp.at(i).begin(), temp.at(i).end(), '\n'), temp.at(i).end());
+        std::cout << temp.at(i) << " ";
+    }
+    std::cout << std::endl;
+}
+
 /* Close pipes so processes will complete */
 void Uniqify::close_read_pipes() {
-    for (int i = 0; i < numChildren; ++i) {
+    for (int i = 0; i < num_children; ++i) {
         if (fclose(pfdlist[i][PIPE_READ]) < 0) {
+
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
 }
 
 void Uniqify::sort_unique() {
+
     std::sort(words.begin(), words.end());
     words.erase(std::unique(words.begin(), words.end()), words.end());
 }
@@ -259,26 +296,28 @@ void Uniqify::wait_for_children() {
             break; /* Zombies!!! */
         }
         ++loops;
-        (i == numChildren - 1) ? i = 0 : ++i;
-    } while (numended != numChildren - 1);
+        (i == num_children - 1) ? i = 0 : ++i;
+    } while (numended != num_children - 1);
 }
+
 /* Get the output. */
 void Uniqify::print() {
     for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
+
         std::cout << *it;
     }
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cout << "USAGE: uniqify [num_sort_processes]\n";
-        exit(EXIT_SUCCESS);
-    }
+    //    if (argc != 2) {
+    //        std::cout << "USAGE: uniqify [num_sort_processes]\n";
+    //        exit(EXIT_SUCCESS);
+    //    }
     clock_t start;
     clock_t theend;
     try {
         start = clock();
-        Uniqify uniq(atoi(argv[1]));
+        Uniqify uniq(3); //atoi(argv[1])
         uniq.run();
         uniq.print();
         theend = clock();
