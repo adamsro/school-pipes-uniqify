@@ -59,48 +59,75 @@ bool notalpha(char c) {
 class Uniqify {
     static const int PIPE_READ = 0;
     static const int PIPE_WRITE = 1;
-    std::vector<pipes_t> plist;
     int num_children;
-    pipesfd_t* pfdlist;
+    std::vector<pipes_t> plist;
 public:
     int num_words_parsed;
-    std::vector<std::string> words;
     Uniqify(int children);
     void run();
     void print();
     void print_vector(std::vector<std::string> temp);
 protected:
-    void pipe_and_fork();
-    void open_pipes();
-    void parser();
-    void close_write_pipes();
-    void suppressor();
-    void close_read_pipes();
-    void sort_unique();
+    void fork_all_sorts();
+    void parser(pipesfd_t* pfdlist);
+    void suppressor(pipesfd_t* pfdlist);
     void wait_for_children();
+
+    void fdopen_read_pipes(pipesfd_t* pfdlist);
+    void fdopen_write_pipes(pipesfd_t* pfdlist);
+    void fclose_read_pipes(pipesfd_t* pfdlist);
+    void fclose_write_pipes(pipesfd_t* pfdlist);
 };
 
 Uniqify::Uniqify(int children) {
     num_children = children;
 }
 
-/* get this mess in motion */
+/* function first forks all sorts, then forks parser (starts parsing), continues to suppressor */
 void Uniqify::run() {
-    pipe_and_fork();
+//    pid_t child_pid;
+//    int status;
+    pipesfd_t* pfdlist;
+
     pfdlist = (pipesfd_t*) std::malloc(num_children * sizeof (pipesfd_t));
     if (pfdlist == NULL) {
         throw (Exception("malloc failed", __LINE__, errno));
     }
-    open_pipes();
-    parser();
-    close_write_pipes();
-    suppressor();
-    close_read_pipes();
+    fork_all_sorts();
+
+    fdopen_read_pipes( pfdlist);
+    fdopen_write_pipes( pfdlist);
+
+    parser(pfdlist);
+    fclose_write_pipes(pfdlist);
+
+    suppressor(pfdlist);
+    fclose_read_pipes(pfdlist);
+
+    wait_for_children(); /* wait for all sort children */
+
+    //    switch (child_pid = fork()) {
+    //        case -1:
+    //            throw (Exception("fork failed", __LINE__, errno));
+    //        case 0: // is Child
+    //            parser(pfdlist);
+    //            fclose_write_pipes(pfdlist);
+    //            /*wait for all sort procs to complete */
+    //            exit(0);
+    //        default: // is Parent
+    //            suppressor(pfdlist);
+    //            fclose_read_pipes(pfdlist);
+    //            if ((waitpid(child_pid, &status, 0)) == -1) { /*wait for parser */
+    //                throw (Exception("waitpid error", __LINE__, errno));
+    //            }
+    //            wait_for_children(); /* wait for all sort children */
+    //            break;
+    //    }
+
     free(pfdlist);
-    wait_for_children();
 }
 
-void Uniqify::pipe_and_fork() {
+void Uniqify::fork_all_sorts() {
     int fd1[2];
     int fd2[2];
     pid_t child_pid;
@@ -147,7 +174,7 @@ void Uniqify::pipe_and_fork() {
     }
 
 #ifdef VERBOSE
-    std::cout << "pipes" << std::endl;
+    std::cout << "the pipes: " << std::endl;
     for (int i = 0; i < (int) plist.size(); ++i) {
         std::cout << "pid: " << plist.at(i).child_pid << std::endl;
         std::cout << plist.at(i).read_bychild << " " << plist.at(i).write_byparent;
@@ -158,24 +185,8 @@ void Uniqify::pipe_and_fork() {
 
 }
 
-/* open the right pipes and close everything else */
-void Uniqify::open_pipes() {
-    for (int j = 0; j < num_children; ++j) {
-        close(plist.at(j).read_bychild);
-        close(plist.at(j).write_bychild);
-        pfdlist[j][PIPE_READ] = fdopen(plist.at(j).read_byparent, "r");
-        if (pfdlist[j][PIPE_READ] == NULL) {
-            throw (Exception("fdopen failed", __LINE__, errno));
-        }
-        pfdlist[j][PIPE_WRITE] = fdopen(plist.at(j).write_byparent, "w");
-        if (pfdlist[j][PIPE_WRITE] == NULL) {
-            throw (Exception("fdopen failed", __LINE__, errno));
-        }
-    }
-}
-
 /* send input to the sort processes in a round-robin fashion */
-void Uniqify::parser() {
+void Uniqify::parser(pipesfd_t* pfdlist) {
     std::string word;
     int i = 0;
     num_words_parsed = 0;
@@ -195,18 +206,8 @@ void Uniqify::parser() {
     //file.close();
 }
 
-/* Close all the write pipes to flush the buffers */
-void Uniqify::close_write_pipes() {
-    for (int l = 0; l < num_children; ++l) {
-        if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
-
-            throw (Exception("fclose failed", __LINE__, errno));
-        }
-    }
-}
-
 /* retreive all words from sort processes in a round-robin fashion */
-void Uniqify::suppressor() {
+void Uniqify::suppressor(pipesfd_t* pfdlist) {
     std::string oldword;
     int largest = 0;
     std::vector<std::string> temp(num_children, "");
@@ -231,7 +232,7 @@ void Uniqify::suppressor() {
         if (i == num_children - 1) {
             //print_vector(temp);
             // if this word is the same as the word before it, ignore it and move on.
-            if(temp.at(largest).compare(oldword) != 0) {
+            if (temp.at(largest).compare(oldword) != 0) {
                 std::cout << temp.at(largest);
                 oldword.assign(temp.at(largest));
             }
@@ -254,16 +255,6 @@ void Uniqify::print_vector(std::vector<std::string> temp) {
         std::cout << temp.at(i) << " ";
     }
     std::cout << std::endl;
-}
-
-/* Close pipes so processes will complete */
-void Uniqify::close_read_pipes() {
-    for (int i = 0; i < num_children; ++i) {
-        if (fclose(pfdlist[i][PIPE_READ]) < 0) {
-
-            throw (Exception("fclose failed", __LINE__, errno));
-        }
-    }
 }
 
 /* Wait for children to exit */
@@ -295,26 +286,57 @@ void Uniqify::wait_for_children() {
     } while (numended != num_children - 1);
 }
 
-/* Get the output. */
-void Uniqify::print() {
-    for (std::vector<std::string>::iterator it = words.begin(); it != words.end(); ++it) {
+/* open the right pipes and close everything else */
+void Uniqify::fdopen_write_pipes(pipesfd_t* pfdlist) {
+    for (int j = 0; j < num_children; ++j) {
+        pfdlist[j][PIPE_WRITE] = fdopen(plist.at(j).write_byparent, "w");
+        if (pfdlist[j][PIPE_WRITE] == NULL) {
+            throw (Exception("fdopen failed", __LINE__, errno));
+        }
+    }
+}
 
-        std::cout << *it;
+void Uniqify::fdopen_read_pipes(pipesfd_t* pfdlist) {
+    for (int j = 0; j < num_children; ++j) {
+        close(plist.at(j).read_bychild);
+        close(plist.at(j).write_bychild);
+        pfdlist[j][PIPE_READ] = fdopen(plist.at(j).read_byparent, "r");
+        if (pfdlist[j][PIPE_READ] == NULL) {
+            throw (Exception("fdopen failed", __LINE__, errno));
+        }
+    }
+}
+
+/* Close all the write pipes to flush the buffers */
+void Uniqify::fclose_write_pipes(pipesfd_t* pfdlist) {
+    for (int l = 0; l < num_children; ++l) {
+        if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
+            throw (Exception("fclose failed", __LINE__, errno));
+        }
+    }
+}
+
+/* Close pipes so processes will complete */
+void Uniqify::fclose_read_pipes(pipesfd_t* pfdlist) {
+    for (int i = 0; i < num_children; ++i) {
+        if (fclose(pfdlist[i][PIPE_READ]) < 0) {
+
+            throw (Exception("fclose failed", __LINE__, errno));
+        }
     }
 }
 
 int main(int argc, char* argv[]) {
-        if (argc != 2) {
-            std::cout << "USAGE: uniqify [num_sort_processes]\n";
-            exit(EXIT_SUCCESS);
-        }
+    if (argc != 2) {
+        std::cout << "USAGE: uniqify [num_sort_processes]\n";
+        exit(EXIT_SUCCESS);
+    }
     clock_t start;
     clock_t theend;
     try {
         start = clock();
         Uniqify uniq(atoi(argv[1]));
         uniq.run();
-        uniq.print();
         theend = clock();
         std::cout << std::endl << uniq.num_words_parsed << "\t";
         /* Measure with clock cycles, then divide by clocks-per-sec for
