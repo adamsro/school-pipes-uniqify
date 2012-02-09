@@ -149,7 +149,7 @@ void Uniqify::pipe_and_fork() {
 
 #ifdef VERBOSE
     std::cout << "pipes" << std::endl;
-    for (int i = 0; i < plist.size(); ++i) {
+    for (int i = 0; i < (int) plist.size(); ++i) {
         std::cout << "pid: " << plist.at(i).child_pid << std::endl;
         std::cout << plist.at(i).read_bychild << " " << plist.at(i).write_byparent;
         std::cout << " " << plist.at(i).read_byparent << " ";
@@ -210,7 +210,6 @@ void Uniqify::close_write_pipes() {
 void Uniqify::receive_input() {
     int largest = 0;
     std::vector<std::string> temp(num_children, "");
-    std::vector<bool> eof_num(num_children, false);
     int eofs = 0;
     char readbuf [100];
     int i = 0;
@@ -218,7 +217,6 @@ void Uniqify::receive_input() {
         /* if pipe has never been read or is not already empty, read it for the first time */
         if (temp.at(i) == "") {
             if (fgets(readbuf, sizeof readbuf, pfdlist[i][PIPE_READ]) == NULL) {
-                eof_num.at(i) = true;
                 ++eofs;
                 temp.at(i) = CHAR_MIN;
             } else {
@@ -234,7 +232,6 @@ void Uniqify::receive_input() {
             //print_vector(temp);
             std::cout << temp.at(largest);
             if (fgets(readbuf, sizeof readbuf, pfdlist[largest][PIPE_READ]) == NULL) {
-                eof_num.at(largest) = true;
                 ++eofs;
                 temp.at(largest) = CHAR_MIN;
             } else {
@@ -247,8 +244,7 @@ void Uniqify::receive_input() {
 
 void Uniqify::print_vector(std::vector<std::string> temp) {
     std::cout << "arr: ";
-    for (int i = 0; i < temp.size(); ++i) {
-
+    for (int i = 0; i < (int) temp.size(); ++i) {
         temp.at(i).erase(std::remove(temp.at(i).begin(), temp.at(i).end(), '\n'), temp.at(i).end());
         std::cout << temp.at(i) << " ";
     }
@@ -309,15 +305,15 @@ void Uniqify::print() {
 }
 
 int main(int argc, char* argv[]) {
-    //    if (argc != 2) {
-    //        std::cout << "USAGE: uniqify [num_sort_processes]\n";
-    //        exit(EXIT_SUCCESS);
-    //    }
+        if (argc != 2) {
+            std::cout << "USAGE: uniqify [num_sort_processes]\n";
+            exit(EXIT_SUCCESS);
+        }
     clock_t start;
     clock_t theend;
     try {
         start = clock();
-        Uniqify uniq(3); //atoi(argv[1])
+        Uniqify uniq(atoi(argv[1]));
         uniq.run();
         uniq.print();
         theend = clock();
