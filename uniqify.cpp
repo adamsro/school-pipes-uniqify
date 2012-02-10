@@ -77,6 +77,7 @@ protected:
     void fdopen_write_pipes(pipesfd_t* pfdlist);
     void fclose_read_pipes(pipesfd_t* pfdlist);
     void fclose_write_pipes(pipesfd_t* pfdlist);
+    void close_pipes(int i);
 };
 
 Uniqify::Uniqify(int children) {
@@ -85,8 +86,8 @@ Uniqify::Uniqify(int children) {
 
 /* function forks children, parses cin, then when pipes, cout sorted, suppressed words */
 void Uniqify::run() {
-    //    pid_t child_pid;
-    //    int status;
+    pid_t child_pid;
+    int status;
     pipesfd_t* pfdlist;
 
     pfdlist = (pipesfd_t*) std::malloc(num_children * sizeof (pipesfd_t));
@@ -97,15 +98,21 @@ void Uniqify::run() {
 
     fdopen_read_pipes(pfdlist);
     fdopen_write_pipes(pfdlist);
-
     parser(pfdlist);
     fclose_write_pipes(pfdlist);
-
     suppressor(pfdlist);
     fclose_read_pipes(pfdlist);
-
-     wait_for_children();
+    wait_for_children();
     free(pfdlist);
+
+    //    switch (child_pid = fork()) {
+    //        case -1: //fail
+    //        case 0: //child
+    //
+    //            exit(0);
+    //        default:
+    //
+    //    }
 }
 
 void Uniqify::fork_all_sorts() {
@@ -130,21 +137,18 @@ void Uniqify::fork_all_sorts() {
                 throw (Exception("fork failed", __LINE__, errno));
             case 0: // is Child
                 /* Close stdin and duplicate PIPE_READ to this position */
-                close(p.write_byparent);
-                close(p.read_byparent);
                 if (p.read_bychild != STDIN_FILENO) {
                     if (dup2(p.read_bychild, STDIN_FILENO) != STDIN_FILENO) {
                         throw (Exception("dup2 failed", __LINE__, errno));
                     }
-                    close(p.read_bychild);
                 }
                 /* Close stdout and duplicate PIPE_WRITE to this position */
                 if (p.write_bychild != STDOUT_FILENO) {
                     if (dup2(p.write_bychild, STDOUT_FILENO) != STDOUT_FILENO) {
                         throw (Exception("dup2 failed", __LINE__, errno));
                     }
-                    close(p.write_bychild);
                 }
+                close_pipes(i);
                 execlp("sort", "sort", NULL); //"/usr/bin/sort"
                 _exit(127); /* Failed exec, doesn't flush file desc */
                 break;
@@ -171,7 +175,7 @@ void Uniqify::parser(pipesfd_t* pfdlist) {
     std::string word;
     int i = 0;
     num_words_parsed = 0;
-//    std::ifstream file("test.txt");
+    //    std::ifstream file("test.txt");
     while (std::cin >> word) {
         /* remove all no alpha charactors and transform all uppercase to lowercase */
         word.erase(std::remove_if(word.begin(), word.end(), notalpha), word.end());
@@ -226,6 +230,7 @@ void Uniqify::suppressor(pipesfd_t* pfdlist) {
         (i == num_children - 1) ? i = 0 : ++i;
     }
 }
+
 /* used for debugging */
 void Uniqify::print_vector(std::vector<std::string> temp) {
     std::cout << "arr: ";
@@ -276,11 +281,11 @@ void Uniqify::fdopen_write_pipes(pipesfd_t* pfdlist) {
 }
 
 void Uniqify::fdopen_read_pipes(pipesfd_t* pfdlist) {
-    for (int j = 0; j < num_children; ++j) {
-        close(plist.at(j).read_bychild);
-        close(plist.at(j).write_bychild);
-        pfdlist[j][PIPE_READ] = fdopen(plist.at(j).read_byparent, "r");
-        if (pfdlist[j][PIPE_READ] == NULL) {
+    for (int i = 0; i < num_children; ++i) {
+        close(plist.at(i).read_bychild);
+        close(plist.at(i).write_bychild);
+        pfdlist[i][PIPE_READ] = fdopen(plist.at(i).read_byparent, "r");
+        if (pfdlist[i][PIPE_READ] == NULL) {
             throw (Exception("fdopen failed", __LINE__, errno));
         }
     }
@@ -288,8 +293,8 @@ void Uniqify::fdopen_read_pipes(pipesfd_t* pfdlist) {
 
 /* Close all the write pipes to flush the buffers */
 void Uniqify::fclose_write_pipes(pipesfd_t* pfdlist) {
-    for (int l = 0; l < num_children; ++l) {
-        if (fclose(pfdlist[l][PIPE_WRITE]) < 0) {
+    for (int i = 0; i < num_children; ++i) {
+        if (fclose(pfdlist[i][PIPE_WRITE]) < 0) {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
@@ -303,6 +308,13 @@ void Uniqify::fclose_read_pipes(pipesfd_t* pfdlist) {
             throw (Exception("fclose failed", __LINE__, errno));
         }
     }
+}
+
+void Uniqify::close_pipes(int i) {
+    close(plist.at(i).write_byparent);
+    close(plist.at(i).read_byparent);
+    close(plist.at(i).write_bychild);
+    close(plist.at(i).write_bychild);
 }
 
 int main(int argc, char* argv[]) {
